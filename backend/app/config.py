@@ -30,7 +30,13 @@ class Config:
     # LLM configuration (unified OpenAI format)
     LLM_API_KEY = os.environ.get('LLM_API_KEY')
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
-    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'qwen2.5:32b')
+    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gemma4:e4b')
+
+    # Aurora: tiered Gemma 4 routing
+    # gemma4:e2b (~2 GB Q4) for fast NPC / population agent decisions
+    # gemma4:e4b (~3 GB Q4) for responder dispatch + report synthesis
+    TRIAGE_MODEL_NAME = os.environ.get('TRIAGE_MODEL_NAME', 'gemma4:e2b')
+    REASONING_MODEL_NAME = os.environ.get('REASONING_MODEL_NAME', 'gemma4:e4b')
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
