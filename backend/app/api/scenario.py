@@ -1,15 +1,17 @@
 """
-Aurora /api/scenario endpoints — load + inspect city-resilience scenarios.
+Aurora /api/scenario endpoints — load + inspect city-resilience scenarios
++ Monte Carlo intervention runner.
 
-These are the routes the frontend's Scenario Builder uses:
+Routes:
     POST   /api/scenario/load           bake + persist a reference scenario
     GET    /api/scenario/<scenario_id>/state    fetch current state from Neo4j
     DELETE /api/scenario/<scenario_id>          wipe a scenario subgraph
     GET    /api/scenario/list           list known scenarios
     POST   /api/scenario/<scenario_id>/baseline_loss   deterministic HAZUS run
+    GET    /api/scenario/interventions               list available interventions
+    POST   /api/scenario/<scenario_id>/run_mc        run Monte Carlo with N trials
 
-All routes return {success, data | error}. The simulation/MC orchestrator
-lives at /api/simulation (legacy blueprint) — this blueprint is deck only.
+All routes return {success, data | error}.
 """
 
 from __future__ import annotations
@@ -20,9 +22,12 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
+from ..aurora.decision_cache import get_default_cache
 from ..aurora.hazus_fragility import (
     estimate_building_loss, shaking_intensity_to_sa,
 )
+from ..aurora.intervention_dsl import PRESET_INTERVENTIONS
+from ..aurora.monte_carlo import run_monte_carlo, run_to_dict
 from ..aurora.neo4j_writer import (
     delete_scenario, get_scenario_summary, write_scenario,
 )
@@ -217,3 +222,92 @@ def baseline_loss(scenario_id: str):
                             for k, v in by_district.items()},
         },
     })
+
+
+@scenario_bp.route("/interventions", methods=["GET"])
+def list_interventions():
+    """Return the registry of preset interventions for the UI Designer."""
+    out = []
+    for iid, iv in PRESET_INTERVENTIONS.items():
+        out.append({
+            "intervention_id": iid,
+            "kind": iv.kind,
+            "label": iv.label,
+            "params": {
+                k: v for k, v in iv.to_dict().items()
+                if k not in ("intervention_id", "kind", "label")
+            },
+        })
+    return jsonify({"success": True, "data": {"interventions": out}})
+
+
+@scenario_bp.route("/<scenario_id>/run_mc", methods=["POST"])
+def run_mc(scenario_id: str):
+    """Run a Monte Carlo experiment: N trials per intervention vs baseline.
+
+    Body: {
+        "intervention_ids": ["preposition_d03_4amb", "evac_d03_30min_early"],
+        "n_trials": 50,
+        "duration_hours": 72,
+        "n_population_agents": 200,
+        "use_llm": false       // true to call Ollama for Gemma decisions
+    }
+
+    Returns the full MC run dict — baseline outcome, treated outcomes, and
+    paired delta CIs (lives_saved, dollars_saved, misinfo_ratio_change).
+    """
+    builder = REFERENCE_BUILDERS.get(scenario_id)
+    if builder is None:
+        return jsonify({"success": False,
+                        "error": f"Unknown scenario_id: {scenario_id}"}), 404
+
+    body = request.get_json(silent=True) or {}
+    intervention_ids = body.get("intervention_ids") or []
+    n_trials = int(body.get("n_trials", 50))
+    duration_hours = body.get("duration_hours")
+    n_population_agents = int(body.get("n_population_agents", 200))
+    use_llm = bool(body.get("use_llm", False))
+    fast_model = body.get("fast_model", "gemma4:e2b")
+
+    # Validate interventions
+    unknown = [iid for iid in intervention_ids
+               if iid not in PRESET_INTERVENTIONS]
+    if unknown:
+        return jsonify({"success": False,
+                        "error": f"Unknown intervention_ids: {unknown}"}), 400
+
+    # Hardening: keep MC bounded so demo box can't accidentally launch a
+    # 50,000-trial job. Adjust if/when the simulator gets faster.
+    n_trials = max(1, min(n_trials, 200))
+    n_population_agents = max(20, min(n_population_agents, 500))
+
+    scn = builder()
+
+    llm_call = None
+    if use_llm:
+        try:
+            from ..services.llm_client import get_default_client
+            llm_call = get_default_client().chat_json
+        except Exception:
+            logger.exception("LLM client unavailable; falling back to synth")
+
+    cache = get_default_cache()
+    try:
+        run = run_monte_carlo(
+            scn, intervention_ids,
+            n_trials=n_trials,
+            duration_hours=duration_hours,
+            n_population_agents=n_population_agents,
+            llm_call=llm_call,
+            fast_model=fast_model,
+            cache=cache,
+        )
+        return jsonify({
+            "success": True,
+            "data": run_to_dict(run),
+        })
+    except Exception as exc:
+        logger.exception("MC run failed for %s", scenario_id)
+        return jsonify({"success": False,
+                        "error": str(exc),
+                        "trace": traceback.format_exc()}), 500

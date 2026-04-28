@@ -264,7 +264,7 @@ def _hourly_loss(
                 af, b.lat, b.lon,
             ) - mmi)  # take max of base or aftershock-augmented
         sa = shaking_intensity_to_sa(mmi)
-        est = estimate_building_loss(b.hazus_class, sa)
+        est = estimate_building_loss(b.hazus_class, sa, year_built=b.year_built)
         rep = b.representative_count
 
         # Stochastic: did this building actually collapse this hour?
@@ -318,6 +318,7 @@ def run_trial(
     llm_call: Any | None = None,
     fast_model: str = "gemma4:e2b",
     cache: DecisionCache | None = None,
+    runtime_overrides: dict[str, Any] | None = None,
 ) -> TrialResult:
     """Run one Monte Carlo trial. Pure function modulo `cache` (which is the
     intentional cross-trial state — that's what gives 60% hit rate).
@@ -326,6 +327,12 @@ def run_trial(
     duration = duration_hours or scenario.hazard.duration_hours
     rng = random.Random(seed + trial_id)
     t0 = time.perf_counter()
+    overrides = runtime_overrides or {}
+    hospital_floors: dict[str, float] = overrides.get(
+        "hospital_capacity_floor_by_district", {},
+    )
+    auth_reach_mult = float(overrides.get("authority_reach_multiplier", 1.0))
+    misinfo_dampen = float(overrides.get("misinfo_dampener", 1.0))
 
     # Cast: one population sample, one responder pool per trial
     pop = generate_population(
@@ -404,6 +411,15 @@ def run_trial(
         # 3) Infrastructure cascade
         update_infra_state(infra_states, collapse_share,
                            aftershock_in_district=af_in_district)
+        # Apply intervention floors AFTER cascade so pre-positioning doesn't
+        # mask infrastructure failure — it just dampens it. A district with
+        # both power+comms down still loses some capacity, but the
+        # pre-staged ambulances keep at least `floor` of capacity online.
+        for did, floor in hospital_floors.items():
+            if did in infra_states:
+                infra_states[did].hospital_capacity_mult = max(
+                    infra_states[did].hospital_capacity_mult, float(floor),
+                )
 
         # 4) Population decisions: one cache lookup per cell, applied to
         #    every agent in that cell with their posting rate.
@@ -440,10 +456,10 @@ def run_trial(
                 )
                 if archetype in ("misinformer", "conspiracist"):
                     posts_misinfo += int(cell_posts_f)
-                    impressions_misinfo += cell_impressions
+                    impressions_misinfo += int(cell_impressions * misinfo_dampen)
                 if archetype == "authority":
                     posts_authority += int(cell_posts_f)
-                    impressions_authority += cell_impressions
+                    impressions_authority += int(cell_impressions * auth_reach_mult)
 
         # 5) Hospital load: untreated portion converts at small rate to deaths
         hosp_load_pct = min(1.5, injuries_total / max(1, hosp_cap[

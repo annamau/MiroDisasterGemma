@@ -100,6 +100,41 @@ HAZUS_HIGH_CODE: dict[BuildingClass, FragilityCurve] = {
 }
 
 
+# HAZUS-MH 2.1 Table 5.9c — pre-code seismic design (pre-1973 California, used
+# as proxy for unretrofitted construction). Medians are roughly 50% of high-code
+# medians, betas slightly higher. The big effect is on W1 (cripple-walls) and
+# C1L (lightly-confined columns) — exactly the targets of the retrofit DSL.
+HAZUS_PRE_CODE: dict[BuildingClass, FragilityCurve] = {
+    "W1": FragilityCurve(
+        building_class="W1",
+        description="Wood, Light Frame (pre-code, no foundation bolting)",
+        median={"slight": 0.20, "moderate": 0.34, "extensive": 0.61, "complete": 1.04},
+        beta={"slight": 0.64, "moderate": 0.64, "extensive": 0.64, "complete": 0.64},
+    ),
+    "C1L": FragilityCurve(
+        building_class="C1L",
+        description="Concrete Moment Frame Low-Rise (pre-code, no ductility)",
+        median={"slight": 0.13, "moderate": 0.18, "extensive": 0.30, "complete": 0.51},
+        beta={"slight": 0.74, "moderate": 0.77, "extensive": 0.83, "complete": 0.98},
+    ),
+    "C1M": FragilityCurve(
+        building_class="C1M",
+        description="Concrete Moment Frame Mid-Rise (pre-code)",
+        median={"slight": 0.10, "moderate": 0.14, "extensive": 0.26, "complete": 0.55},
+        beta={"slight": 0.74, "moderate": 0.74, "extensive": 0.71, "complete": 0.77},
+    ),
+    "PC1": FragilityCurve(
+        building_class="PC1",
+        description="Pre-Cast Concrete Tilt-Up (pre-code, no roof-wall ties)",
+        median={"slight": 0.13, "moderate": 0.17, "extensive": 0.27, "complete": 0.50},
+        beta={"slight": 0.74, "moderate": 0.74, "extensive": 0.81, "complete": 0.91},
+    ),
+}
+
+
+HIGH_CODE_YEAR_THRESHOLD = 1980
+
+
 def _phi(x: float) -> float:
     """Standard normal CDF using the error function — no numpy dependency."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -184,13 +219,24 @@ def estimate_building_loss(
     building_class: BuildingClass,
     sa_g: float,
     *,
-    fragility_table: dict[BuildingClass, FragilityCurve] = HAZUS_HIGH_CODE,
+    year_built: int | None = None,
+    fragility_table: dict[BuildingClass, FragilityCurve] | None = None,
 ) -> BuildingLossEstimate:
     """One-shot per-building expected loss given spectral acceleration.
 
-    Use this in the simulator for deterministic averages, OR sample from
-    `damage_state_probabilities` directly for Monte Carlo realizations.
+    If `fragility_table` is None, picks pre-code vs high-code by `year_built`
+    against HIGH_CODE_YEAR_THRESHOLD. If `year_built` is also None, defaults
+    to high-code (post-1980) — the assumption embedded in the original API.
+
+    The retrofit intervention works through this path: pre-1980 W1 with
+    year_built clamped to 2020 -> picks HIGH_CODE table -> ~50% lower
+    median Sa to collapse -> measurable reduction in expected deaths.
     """
+    if fragility_table is None:
+        if year_built is not None and year_built < HIGH_CODE_YEAR_THRESHOLD:
+            fragility_table = HAZUS_PRE_CODE
+        else:
+            fragility_table = HAZUS_HIGH_CODE
     curve = fragility_table[building_class]
     probs = damage_state_probabilities(sa_g, curve)
 
