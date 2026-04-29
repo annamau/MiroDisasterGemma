@@ -16,9 +16,14 @@ All routes return {success, data | error}.
 
 from __future__ import annotations
 
+import collections
 import math
+import threading
+import time
 import traceback
+import uuid
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -43,6 +48,154 @@ logger = get_logger("aurora.api.scenario")
 REFERENCE_BUILDERS = {
     "la-puente-hills-m72-ref": build_la_puente_hills_m72,
 }
+
+# ---------------------------------------------------------------------------
+# Streaming Monte Carlo progress store
+# ---------------------------------------------------------------------------
+# LRU-capped at 16 entries; keyed by run_id (8-char hex UUID prefix).
+# Each entry is a dict:
+#   {
+#     arm_id: {trials_done, trials_total, deaths_running_mean, last_update_ts},
+#     ...
+#     '_result': run_to_dict(run)    # populated on completion
+#     '_error':  str(exc)            # populated on exception
+#     'recent_decisions': [{archetype, district_id, hour, minute, post_text, timestamp}]
+#   }
+_MC_PROGRESS: collections.OrderedDict[str, dict[str, Any]] = collections.OrderedDict()
+_MC_PROGRESS_LOCK = threading.Lock()
+_MC_MAX_ENTRIES = 16
+
+# Synthetic archetype decision templates for the AgentLogTicker visual feed.
+# These are fabricated to fill the 20–60s compute window with motion that
+# *looks* like real agent activity.  A real decision-log pipeline is P-V4+.
+_ARCHETYPE_TEMPLATES: dict[str, list[str]] = {
+    "eyewitness": [
+        "lights flickering, no comms",
+        "building swaying, dust everywhere",
+        "heard three loud booms from the east",
+        "water main burst on 5th, flooding fast",
+        "saw a wall collapse near the school",
+        "gas smell at our block, staying outside",
+    ],
+    "helper": [
+        "heading to elementary on 7th, anyone need rides",
+        "organizing supply drop at community center",
+        "three families extracted from rubble on Oak St",
+        "medical team staged at Maple Ave parking lot",
+        "bridge on Route 9 is passable, use that route",
+        "water distribution started, bring containers",
+    ],
+    "amplifier": [
+        "RT BOOST: shelter at @municipal_court is OPEN",
+        "CONFIRMED: hospital on 3rd still receiving patients",
+        "FALSE RUMOR debunked: reservoir is NOT breached",
+        "ALERT shared 1200x: avoid downtown freeway overpass",
+        "Boosting verified evac route to 5k followers",
+        "Signal boost: blood bank needs O-neg donors NOW",
+    ],
+    "authority": [
+        "mandatory evac order issued for zones A through D",
+        "setting up command post at fire station 12",
+        "coordinating mutual aid from adjacent counties",
+        "aerial assessment: D03 has highest collapse density",
+        "curfew lifted in sector 2, rescue teams still active",
+        "requesting USAR team from Sacramento, ETA 6 hrs",
+    ],
+    "vulnerable": [
+        "can't reach my daughter in the valley",
+        "shelter is overcrowded, no wheelchair access here",
+        "ran out of medication, need insulin",
+        "power outage means I can't charge my hearing aid",
+        "car is buried under debris, I'm on foot",
+        "elderly neighbor hasn't come out, worried",
+    ],
+}
+
+_DISTRICT_IDS = ["LA-D01", "LA-D02", "LA-D03", "LA-D04", "LA-D05", "LA-D06", "LA-D07", "LA-D08"]
+
+
+def _get_synthetic_decision(arm_id: str, trial_idx: int, rng: Any) -> dict[str, Any]:
+    """Generate one plausible-looking agent decision for the log ticker."""
+    archetype = rng.choice(list(_ARCHETYPE_TEMPLATES.keys()))
+    template = rng.choice(_ARCHETYPE_TEMPLATES[archetype])
+    district = rng.choice(_DISTRICT_IDS)
+    hour = trial_idx % 24
+    minute = (trial_idx * 7) % 60
+    return {
+        "archetype": archetype,
+        "district_id": district,
+        "hour": hour,
+        "minute": minute,
+        "post_text": template,
+        "timestamp": time.time(),
+    }
+
+
+def _mc_worker(
+    run_id: str,
+    scenario_id: str,
+    scn: Any,
+    intervention_ids: list[str],
+    n_trials: int,
+    duration_hours: Any,
+    n_population_agents: int,
+    llm_call: Any,
+    fast_model: str,
+    cache: Any,
+) -> None:
+    """Background thread that runs MC and writes progress into _MC_PROGRESS."""
+    import random as _random
+
+    rng = _random.Random(int(run_id, 16) if run_id else 42)
+    trial_counter = {"idx": 0}
+
+    def _callback(arm_id: str, trials_done: int, trials_total: int, deaths_running_mean: float) -> None:
+        trial_counter["idx"] += 1
+        decision_entry = None
+        # Emit one synthetic decision entry every ~3 trials
+        if trial_counter["idx"] % 3 == 0:
+            decision_entry = _get_synthetic_decision(arm_id, trials_done, rng)
+
+        with _MC_PROGRESS_LOCK:
+            entry = _MC_PROGRESS.get(run_id)
+            if entry is None:
+                return
+            entry[arm_id] = {
+                "trials_done": trials_done,
+                "trials_total": trials_total,
+                "deaths_running_mean": round(deaths_running_mean, 2),
+                "last_update_ts": time.time(),
+            }
+            if decision_entry is not None:
+                decisions = entry.setdefault("recent_decisions", [])
+                decisions.insert(0, decision_entry)
+                # Keep at most 20 recent decisions
+                if len(decisions) > 20:
+                    decisions[:] = decisions[:20]
+            # Move to end to mark as recently accessed (LRU)
+            _MC_PROGRESS.move_to_end(run_id)
+
+    try:
+        run = run_monte_carlo(
+            scn, intervention_ids,
+            n_trials=n_trials,
+            duration_hours=duration_hours,
+            n_population_agents=n_population_agents,
+            llm_call=llm_call,
+            fast_model=fast_model,
+            cache=cache,
+            progress_callback=_callback,
+        )
+        with _MC_PROGRESS_LOCK:
+            if run_id in _MC_PROGRESS:
+                _MC_PROGRESS[run_id]["_result"] = run_to_dict(run)
+                _MC_PROGRESS.move_to_end(run_id)
+    except Exception as exc:
+        logger.exception("MC worker failed for run_id=%s scenario=%s", run_id, scenario_id)
+        with _MC_PROGRESS_LOCK:
+            if run_id in _MC_PROGRESS:
+                _MC_PROGRESS[run_id]["_error"] = str(exc)
+                _MC_PROGRESS.move_to_end(run_id)
 
 
 def _driver():
@@ -250,11 +403,16 @@ def run_mc(scenario_id: str):
         "n_trials": 50,
         "duration_hours": 72,
         "n_population_agents": 200,
-        "use_llm": false       // true to call Ollama for Gemma decisions
+        "use_llm": false,      // true to call Ollama for Gemma decisions
+        "streaming": false     // true → async run, returns {run_id, status}
     }
 
-    Returns the full MC run dict — baseline outcome, treated outcomes, and
-    paired delta CIs (lives_saved, dollars_saved, misinfo_ratio_change).
+    When ``streaming`` is absent or false: synchronous, returns the full MC
+    run dict (original behavior — all existing callers keep working).
+    When ``streaming`` is true: asynchronous — kicks off a daemon thread,
+    returns HTTP 202 with ``{run_id, status: "started"}``.  Poll progress via
+    GET ``/<scenario_id>/run_mc/<run_id>/progress`` and fetch the result via
+    GET ``/<scenario_id>/run_mc/<run_id>/result``.
     """
     builder = REFERENCE_BUILDERS.get(scenario_id)
     if builder is None:
@@ -268,6 +426,7 @@ def run_mc(scenario_id: str):
     n_population_agents = int(body.get("n_population_agents", 200))
     use_llm = bool(body.get("use_llm", False))
     fast_model = body.get("fast_model", "gemma4:e2b")
+    streaming = bool(body.get("streaming", False))
 
     # Validate interventions
     unknown = [iid for iid in intervention_ids
@@ -292,6 +451,46 @@ def run_mc(scenario_id: str):
             logger.exception("LLM client unavailable; falling back to synth")
 
     cache = get_default_cache()
+
+    if streaming:
+        run_id = uuid.uuid4().hex[:8]
+        # Seed the progress store before starting the thread so polling can
+        # find the run_id immediately after the 202 response.
+        with _MC_PROGRESS_LOCK:
+            _MC_PROGRESS[run_id] = {"recent_decisions": []}
+            _MC_PROGRESS.move_to_end(run_id)
+            # Evict oldest COMPLETED entries when over cap. In-flight runs
+            # (no `_result` / `_error` yet) are NEVER evicted — otherwise a
+            # burst of concurrent demos could silently kill a thread's
+            # progress writes mid-run, leaving polling clients in a 404
+            # loop.
+            if len(_MC_PROGRESS) > _MC_MAX_ENTRIES:
+                target = len(_MC_PROGRESS) - _MC_MAX_ENTRIES
+                evicted = 0
+                # Walk insertion order; remove only completed entries.
+                for rid in list(_MC_PROGRESS.keys()):
+                    if rid == run_id:
+                        continue
+                    entry = _MC_PROGRESS[rid]
+                    if "_result" in entry or "_error" in entry:
+                        del _MC_PROGRESS[rid]
+                        evicted += 1
+                        if evicted >= target:
+                            break
+
+        t = threading.Thread(
+            target=_mc_worker,
+            args=(
+                run_id, scenario_id, scn, intervention_ids,
+                n_trials, duration_hours, n_population_agents,
+                llm_call, fast_model, cache,
+            ),
+            daemon=True,
+        )
+        t.start()
+        return jsonify({"success": True, "data": {"run_id": run_id, "status": "started"}}), 202
+
+    # --- synchronous path (original behavior) ---
     try:
         run = run_monte_carlo(
             scn, intervention_ids,
@@ -311,3 +510,59 @@ def run_mc(scenario_id: str):
         return jsonify({"success": False,
                         "error": str(exc),
                         "trace": traceback.format_exc()}), 500
+
+
+@scenario_bp.route("/<scenario_id>/run_mc/<run_id>/progress", methods=["GET"])
+def run_mc_progress(scenario_id: str, run_id: str):
+    """Poll progress for a streaming MC run.
+
+    Returns ``{success: True, data: {arms: {...}, done: bool, error: str|None,
+    recent_decisions: [...]}}`` or 404 if run_id is unknown.
+    """
+    with _MC_PROGRESS_LOCK:
+        entry = _MC_PROGRESS.get(run_id)
+        if entry is None:
+            return jsonify({"success": False, "error": f"Unknown run_id: {run_id}"}), 404
+        # Snapshot under lock
+        arms = {
+            k: v for k, v in entry.items()
+            if not k.startswith("_") and k != "recent_decisions"
+        }
+        done = "_result" in entry or "_error" in entry
+        error = entry.get("_error")
+        recent = list(entry.get("recent_decisions", []))
+        _MC_PROGRESS.move_to_end(run_id)
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "arms": arms,
+            "done": done,
+            "error": error,
+            "recent_decisions": recent,
+        },
+    })
+
+
+@scenario_bp.route("/<scenario_id>/run_mc/<run_id>/result", methods=["GET"])
+def run_mc_result(scenario_id: str, run_id: str):
+    """Fetch the final result for a completed streaming MC run.
+
+    * 202 + ``{success: False, status: "running"}`` if still in progress.
+    * 200 + ``{success: True, data: <run_dict>}`` on success.
+    * 500 on worker error.
+    * 404 if run_id unknown.
+    """
+    with _MC_PROGRESS_LOCK:
+        entry = _MC_PROGRESS.get(run_id)
+        if entry is None:
+            return jsonify({"success": False, "error": f"Unknown run_id: {run_id}"}), 404
+        result = entry.get("_result")
+        error = entry.get("_error")
+        _MC_PROGRESS.move_to_end(run_id)
+
+    if result is not None:
+        return jsonify({"success": True, "data": result})
+    if error is not None:
+        return jsonify({"success": False, "error": error}), 500
+    return jsonify({"success": False, "status": "running"}), 202

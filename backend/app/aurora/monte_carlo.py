@@ -44,7 +44,7 @@ import random
 import statistics
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 from .agent_runtime import TrialResult, run_trial, trial_to_dict
 from .decision_cache import DecisionCache, get_default_cache
@@ -152,8 +152,24 @@ def _run_intervention_trials(
     llm_call: Any | None,
     fast_model: str,
     cache: DecisionCache,
+    progress_callback: Optional[Callable[[str, int, int, float], None]] = None,
 ) -> InterventionOutcome:
-    """Run N trials with this intervention applied. Trials share cache."""
+    """Run N trials with this intervention applied. Trials share cache.
+
+    Progress streaming design choice
+    ---------------------------------
+    We stream ``deaths_running_mean`` (positive = deaths) per arm rather
+    than a pre-computed lives_saved value.  Rationale: the baseline arm
+    runs first, so its mean is not yet available when the treatment arm
+    starts streaming.  The frontend computes
+    ``lives_saved = baseline_deaths_mean - treatment_deaths_mean`` once
+    both arms have data.  This keeps the callback signature simple and
+    avoids a two-pass dependency.
+
+    Callback signature: ``progress_callback(arm_id, trials_done, trials_total,
+    deaths_running_mean) -> None``.  Pass ``None`` for no-op behavior (100 %
+    backwards compatible — all existing call sites keep working).
+    """
     mutated = intervention.apply(scenario)
     overrides = intervention.runtime_overrides()
     trials: list[TrialResult] = []
@@ -179,6 +195,14 @@ def _run_intervention_trials(
             intervention.intervention_id, i + 1, n_trials,
             t.deaths, t.wall_seconds,
         )
+        if progress_callback is not None:
+            running_mean = sum(tr.deaths for tr in trials) / len(trials)
+            progress_callback(
+                intervention.intervention_id,
+                i + 1,
+                n_trials,
+                running_mean,
+            )
 
     deaths = [t.deaths for t in trials]
     injuries = [t.injuries for t in trials]
@@ -301,11 +325,16 @@ def run_monte_carlo(
     llm_call: Any | None = None,
     fast_model: str = "gemma4:e2b",
     cache: DecisionCache | None = None,
+    progress_callback: Optional[Callable[[str, int, int, float], None]] = None,
 ) -> MonteCarloRun:
     """Run baseline + each requested intervention, return paired deltas.
 
     `intervention_ids` does NOT need to include "baseline" — it's added
     automatically as the reference point for delta computation.
+
+    ``progress_callback`` is optional; when provided it is called after each
+    trial with ``(arm_id, trials_done, trials_total, deaths_running_mean)``.
+    Pass ``None`` (the default) to preserve the original silent behavior.
     """
     cache = cache or get_default_cache()
     duration = duration_hours or scenario.hazard.duration_hours
@@ -319,6 +348,7 @@ def run_monte_carlo(
         duration_hours=duration,
         n_population_agents=n_population_agents,
         llm_call=llm_call, fast_model=fast_model, cache=cache,
+        progress_callback=progress_callback,
     )
 
     # 2) Each treatment — same base_seed so trials are paired
@@ -333,6 +363,7 @@ def run_monte_carlo(
             duration_hours=duration,
             n_population_agents=n_population_agents,
             llm_call=llm_call, fast_model=fast_model, cache=cache,
+            progress_callback=progress_callback,
         )
         treated.append(out)
 

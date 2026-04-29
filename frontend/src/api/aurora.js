@@ -19,4 +19,17 @@ export const auroraApi = {
   runMonteCarlo(scenarioId, payload) {
     return service.post(`/api/scenario/${scenarioId}/run_mc`, payload)
   },
+  // P-V3 streaming: kicks off a background MC, returns {run_id} immediately
+  runMCStreaming(scenarioId, payload) {
+    return service.post(`/api/scenario/${scenarioId}/run_mc`, {
+      ...payload,
+      streaming: true,
+    })
+  },
+  getMCProgress(scenarioId, runId) {
+    return service.get(`/api/scenario/${scenarioId}/run_mc/${runId}/progress`)
+  },
+  getMCResult(scenarioId, runId) {
+    return service.get(`/api/scenario/${scenarioId}/run_mc/${runId}/result`)
+  },
 }
