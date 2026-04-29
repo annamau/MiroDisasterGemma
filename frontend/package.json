@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:tokens": "node --test tests/tokens.test.js",
+    "test:components": "vitest run tests/components",
+    "test": "npm run test:tokens && npm run test:components"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -19,7 +22,10 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/test-utils": "^2.4.9",
+    "happy-dom": "^20.9.0",
     "vite": "^7.2.4",
+    "vitest": "^4.1.5",
     "wcag-contrast": "^3.0.0"
   }
 }
