@@ -141,7 +141,7 @@ These are scaffolded but not in v1. The current demo runs entirely on text.
 Aurora is **fully offline** — no cloud APIs, no Google Fonts CDN, no external dependencies once the models and containers are up. You can disconnect from Wi-Fi after Step 2 and the demo still works.
 
 > **TL;DR**: `ollama pull gemma4:e2b && ollama pull gemma4:e4b && ./start.sh`
-> See [docs/USAGE.md](./docs/USAGE.md) for the full command reference and troubleshooting, and [docs/EXTENDING.md](./docs/EXTENDING.md) for adding scenarios / interventions / agent classes.
+> See [docs/USAGE.md](./docs/USAGE.md) for the full command reference and troubleshooting, [docs/EXTENDING.md](./docs/EXTENDING.md) for adding scenarios / interventions / agent classes, [docs/aurora-judge-narrative.md](./docs/aurora-judge-narrative.md) for the full system explanation (judge / reviewer audience), and [docs/aurora-accuracy-plan-v1.md](./docs/aurora-accuracy-plan-v1.md) for the planned upgrade from synth-fragility proxy to PAGER + Jonkman + EF DI + Wilson ash fatality models.
 
 **Step 1 — Pull the Gemma 4 models** (~5 GB total):
 
