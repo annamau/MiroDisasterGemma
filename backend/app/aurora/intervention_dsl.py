@@ -246,6 +246,42 @@ PRESET_INTERVENTIONS: dict[str, Intervention] = {
         authority_reach_multiplier=3.0,
         misinfo_dampener=0.6,
     ),
+
+    # ---------------------------------------------------------------------
+    # Valencia DANA 2024 — interventions cited in the real after-action
+    # reports as missing or late. IDs are scenario-prefixed to avoid
+    # collision with LA interventions.
+    # ---------------------------------------------------------------------
+
+    "vlc_evac_es_alert_4h_early": EvacTimingIntervention(
+        intervention_id="vlc_evac_es_alert_4h_early",
+        label="ES-Alert sent 4h earlier (16:00 instead of 20:11)",
+        target_district_id="VLC-D01",  # Paiporta — deadliest district
+        advance_hours=4,
+        expected_compliance=0.65,
+    ),
+
+    "vlc_preposition_ume_torrent": ResourcePrepositionIntervention(
+        intervention_id="vlc_preposition_ume_torrent",
+        label="Pre-position UME at Torrent upstream choke point",
+        target_district_id="VLC-D03",  # Picanya — upstream of Paiporta
+        added_paramedic_units=6,
+    ),
+
+    "vlc_retrofit_ground_floors": SeismicRetrofitIntervention(
+        intervention_id="vlc_retrofit_ground_floors",
+        label="Flood-proof ground floors in 60% of W1 buildings (D01-D02)",
+        target_district_id="VLC-D01",  # Paiporta
+        target_class="W1",
+        coverage_share=0.60,
+    ),
+
+    "vlc_prebunk_dana_misinfo": MisinfoPrebunkIntervention(
+        intervention_id="vlc_prebunk_dana_misinfo",
+        label="Pre-published flood Q&A (debunks dam-breach rumors)",
+        authority_reach_multiplier=2.5,
+        misinfo_dampener=0.5,
+    ),
 }
 
 

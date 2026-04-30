@@ -37,16 +37,32 @@ from ..aurora.neo4j_writer import (
     delete_scenario, get_scenario_summary, write_scenario,
 )
 from ..aurora.scenario_loader import (
-    build_la_puente_hills_m72, save_reference_scenario,
+    build_la_puente_hills_m72,
+    build_valencia_dana_2024,
+    build_pompeii_79,
+    build_joplin_ef5_2011,
+    build_turkey_syria_m78_2023,
+    build_atlantis,
+    save_reference_scenario,
 )
 from ..utils.logger import get_logger
 
 scenario_bp = Blueprint("scenario", __name__)
 logger = get_logger("aurora.api.scenario")
 
-# Registry of bake-able reference scenarios. Add more as P3 unlocks them.
+# Registry of bake-able reference scenarios.
+# Each entry maps a stable scenario_id (used by the API + UI) to its builder.
+# Mix of real (data-anchored) and mythological (simulation_only) scenarios:
+#   - 5 real: LA M7.2, Valencia DANA 2024, Pompeii AD 79, Joplin EF5 2011,
+#     Türkiye-Syria M7.8 2023
+#   - 1 mythological: Atlantis (Plato — included as a "fun closer" demo)
 REFERENCE_BUILDERS = {
-    "la-puente-hills-m72-ref": build_la_puente_hills_m72,
+    "la-puente-hills-m72-ref":  build_la_puente_hills_m72,
+    "valencia-dana-2024":       build_valencia_dana_2024,
+    "pompeii-79":               build_pompeii_79,
+    "joplin-ef5-2011":          build_joplin_ef5_2011,
+    "turkey-syria-m78-2023":    build_turkey_syria_m78_2023,
+    "atlantis":                 build_atlantis,
 }
 
 # ---------------------------------------------------------------------------

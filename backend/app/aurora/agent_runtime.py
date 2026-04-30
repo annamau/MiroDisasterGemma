@@ -345,13 +345,18 @@ def run_trial(
     for a in pop:
         cell_index.setdefault((a.archetype, a.district_id), []).append(a)
 
-    # Precompute aftershock chain
-    aftershocks = aftershock_chain(
-        scenario.hazard.magnitude,
-        scenario.hazard.epicenter_lat,
-        scenario.hazard.epicenter_lon,
-        duration_hours=duration, seed=seed + trial_id + 200,
-    )
+    # Precompute aftershock chain (earthquake-only; floods/wildfires/hurricanes
+    # don't produce aftershocks, and feeding non-seismic magnitude values
+    # into Bath's law diverges — Valencia DANA's `magnitude=491` is rainfall
+    # in mm, not Mw).
+    aftershocks: list[AftershockEvent] = []
+    if scenario.hazard.kind == "earthquake":
+        aftershocks = aftershock_chain(
+            scenario.hazard.magnitude,
+            scenario.hazard.epicenter_lat,
+            scenario.hazard.epicenter_lon,
+            duration_hours=duration, seed=seed + trial_id + 200,
+        )
     aftershocks_by_hour: dict[int, list[AftershockEvent]] = {}
     for af in aftershocks:
         aftershocks_by_hour.setdefault(int(af.hour), []).append(af)

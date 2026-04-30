@@ -230,20 +230,30 @@ async function retryWithoutLLM() {
 // --- Element / icon enrichment for the new visual layer ---
 // Disasters → element + Phosphor icon
 const SCENARIO_VISUAL = {
-  'la-puente-hills-m72-ref': { element: 'earth', icon: 'Mountains' },
-  'la-wildfire-santa-ana': { element: 'fire', icon: 'Flame' },
-  'socal-flood-arx': { element: 'water', icon: 'WaveTriangle' },
-  'hurricane-diana-cat4': { element: 'air', icon: 'Wind' },
-  'pop-displacement-aether': { element: 'aether', icon: 'Users' },
+  // Real, data-anchored scenarios
+  'la-puente-hills-m72-ref':  { element: 'earth', icon: 'Mountains' },
+  'valencia-dana-2024':       { element: 'water', icon: 'WaveTriangle' },
+  'pompeii-79':               { element: 'fire',  icon: 'Flame' },
+  'joplin-ef5-2011':          { element: 'air',   icon: 'Wind' },
+  'turkey-syria-m78-2023':    { element: 'aether', icon: 'Users' },
+  // Mythological showcase
+  'atlantis':                 { element: 'water', icon: 'WaveTriangle' },
 }
 
 const INTERVENTION_VISUAL = {
   baseline: { element: 'air', icon: 'Siren' },
+  // LA Puente Hills M7.2 interventions
   preposition_d03_4amb: { element: 'aether', icon: 'FirstAidKit' },
   evac_d03_30min_early: { element: 'earth', icon: 'ClockClockwise' },
   retrofit_d03_w1: { element: 'earth', icon: 'Buildings' },
+  retrofit_d02_c1l: { element: 'earth', icon: 'Buildings' },
   prebunk_misinfo: { element: 'aether', icon: 'ChatCircleDots' },
   fire_break_d03: { element: 'fire', icon: 'Flame' },
+  // Valencia DANA 2024 interventions
+  vlc_evac_es_alert_4h_early: { element: 'water', icon: 'ClockClockwise' },
+  vlc_preposition_ume_torrent: { element: 'aether', icon: 'FirstAidKit' },
+  vlc_retrofit_ground_floors: { element: 'water', icon: 'Buildings' },
+  vlc_prebunk_dana_misinfo: { element: 'aether', icon: 'ChatCircleDots' },
 }
 
 function visualFor(map, id, fallback = { element: 'aether', icon: 'Siren' }) {

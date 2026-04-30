@@ -1,5 +1,5 @@
 """
-MiroFish Backend - Flask Application Factory
+Aurora Backend — Flask Application Factory
 """
 
 import os
@@ -36,7 +36,7 @@ def create_app(config_class=Config):
 
     if should_log_startup:
         logger.info("=" * 50)
-        logger.info("MiroFish-Offline Backend starting...")
+        logger.info("Aurora Backend starting...")
         logger.info("=" * 50)
 
     # Enable CORS
@@ -84,10 +84,10 @@ def create_app(config_class=Config):
     # Health check
     @app.route('/health')
     def health():
-        return {'status': 'ok', 'service': 'MiroFish-Offline Backend'}
+        return {'status': 'ok', 'service': 'Aurora Backend'}
 
     if should_log_startup:
-        logger.info("MiroFish-Offline Backend startup complete")
+        logger.info("Aurora Backend startup complete")
 
     return app
 
