@@ -123,4 +123,13 @@ onMounted(() => tweenTo(props.value))
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
+
+@media (max-width: 768px) {
+  .value-row {
+    font-size: var(--fz-48);
+  }
+  .prefix, .unit {
+    font-size: var(--fz-20);
+  }
+}
 </style>

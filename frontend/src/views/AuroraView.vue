@@ -14,7 +14,9 @@
         <span class="step-num">01</span>
         <h2>Scenario</h2>
       </div>
-      <div v-if="!scenarios.length" class="muted">Loading scenarios…</div>
+      <div v-if="!scenarios.length" class="scenario-grid">
+        <SkeletonCard v-for="n in 4" :key="n" variant="scenario" :height="120" />
+      </div>
       <div v-else class="scenario-grid">
         <ScenarioCard
           v-for="s in enrichedScenarios"
@@ -80,7 +82,14 @@
         @click="onRunMC"
         label="Run Monte Carlo"
       />
-      <p v-if="errorMsg" class="err">{{ errorMsg }}</p>
+      <div v-if="errorMsg" class="err">
+        <span>{{ errorMsg }}</span>
+        <button
+          v-if="ollamaError && useLLM"
+          class="btn ghost retry-btn"
+          @click="retryWithoutLLM"
+        >Try without Gemma 4</button>
+      </div>
     </section>
 
     <!-- 4. Streaming progress (visible during run) -->
@@ -160,6 +169,7 @@ import { DUR, EASES } from '@/design/motion'
 import ScenarioCard from '@/components/aurora/ScenarioCard.vue'
 import InterventionChip from '@/components/aurora/InterventionChip.vue'
 import RunButton from '@/components/aurora/RunButton.vue'
+import SkeletonCard from '@/components/aurora/SkeletonCard.vue'
 import MCProgressPanel from '@/components/aurora/MCProgressPanel.vue'
 import AgentLogTicker from '@/components/aurora/AgentLogTicker.vue'
 import HeroNumber from '@/components/aurora/HeroNumber.vue'
@@ -197,6 +207,25 @@ const mcRun = ref(null)
 const streamRunId = ref(null)
 const runState = ref('idle') // idle | running | done
 const recentDecisions = ref([])
+
+// Detect Ollama-not-running so we can offer the "Try without Gemma 4" path.
+const ollamaError = computed(() => {
+  if (!errorMsg.value) return false
+  const m = errorMsg.value.toLowerCase()
+  return (
+    m.includes('ollama') ||
+    m.includes('connection refused') ||
+    m.includes('econnrefused') ||
+    m.includes('no llm client') ||
+    m.includes('no such model')
+  )
+})
+
+async function retryWithoutLLM() {
+  useLLM.value = false
+  errorMsg.value = ''
+  await onRunMC()
+}
 
 // --- Element / icon enrichment for the new visual layer ---
 // Disasters → element + Phosphor icon
@@ -441,7 +470,34 @@ watch([selectedScenarioId, selectedInterventionIds], () => {
   }
 })
 
-onMounted(loadIndex)
+async function applyDemoSeed() {
+  // ?seed=demo prepares the canonical demo: LA M7.2, 3 high-impact
+  // interventions, 20 trials, Gemma 4 enabled, auto-run after 1s.
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('seed') !== 'demo') return
+  selectedScenarioId.value = 'la-puente-hills-m72-ref'
+  selectedInterventionIds.value = [
+    'preposition_d03_4amb',
+    'retrofit_d03_w1',
+    'evac_d03_30min_early',
+  ]
+  nTrials.value = 20
+  nPopulation.value = 80
+  durationHours.value = 24
+  useLLM.value = true
+  // Wait for index to load + 1s breathing room so a recorded video has a
+  // visible "page idle" beat before the run kicks off.
+  await loadIndex()
+  setTimeout(() => {
+    if (canRun.value && runState.value === 'idle') onRunMC()
+  }, 1000)
+}
+
+onMounted(async () => {
+  await loadIndex()
+  await applyDemoSeed()
+})
 </script>
 
 <style scoped>
@@ -615,6 +671,21 @@ onMounted(loadIndex)
   border-radius: 6px;
   font-size: var(--fz-12);
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.retry-btn {
+  font-size: var(--fz-12);
+  padding: 4px var(--sp-2);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--line);
+}
+.btn.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-2);
 }
 
 .streaming-grid {
@@ -652,12 +723,38 @@ onMounted(loadIndex)
   margin-top: var(--sp-4);
 }
 
+/* Stack large result widgets on tablet */
+@media (max-width: 1024px) {
+  .delta-grid {
+    grid-template-columns: 1fr;
+  }
+  .scenario-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .aurora {
     padding: var(--sp-4) var(--sp-3);
   }
   .hdr h1 {
     font-size: var(--fz-24);
+  }
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+  .cfg-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-3);
+  }
+  .cfg-row label {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cfg-row input[type='number'] {
+    width: 110px;
   }
 }
 
