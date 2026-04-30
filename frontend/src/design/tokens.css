@@ -1,0 +1,43 @@
+:root {
+  /* Element palette */
+  --el-fire: #F25C1F;
+  --el-fire-glow: #FF7A47;
+  --el-water: #33C0FF;
+  --el-water-glow: #33C0FF;
+  --el-earth: #B68A5F;
+  --el-earth-glow: #C99B6E;
+  --el-air: #9FE0CF;
+  --el-air-glow: #9FE0CF;
+  --el-aether: #C580F0;
+  --el-aether-glow: #C580F0;
+
+  /* Surface neutrals */
+  --bg-0: #080A12;
+  --bg-1: #10131F;
+  --bg-2: #1A1E2E;
+  --ink-0: #F5F7FB;
+  --ink-1: #9CA3B5;
+  --ink-2: #5A6075;
+  --line: #252A3D;
+  --line-glow: rgba(197, 128, 240, 0.18);
+
+  /* Spacing (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Type scale */
+  --fz-12: 12px;
+  --fz-14: 14px;
+  --fz-16: 16px;
+  --fz-20: 20px;
+  --fz-24: 24px;
+  --fz-32: 32px;
+  --fz-48: 48px;
+  --fz-64: 64px;
+}

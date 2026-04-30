@@ -1,11 +1,11 @@
 [project]
-name = "mirofish-offline-backend"
+name = "aurora-backend"
 version = "0.2.0"
-description = "MiroFish-Offline - Offline-first fork running on Neo4j + Ollama"
+description = "Aurora — City Resilience Digital Twin: an offline-first multi-agent disaster-prevention simulator powered by Gemma 4"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0" }
 authors = [
-    { name = "MiroFish Team" }
+    { name = "Aurora Team" }
 ]
 
 dependencies = [

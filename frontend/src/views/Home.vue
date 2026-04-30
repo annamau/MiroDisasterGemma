@@ -2,10 +2,10 @@
   <div class="home-container">
     <!-- Top Navigation Bar -->
     <nav class="navbar" :style="s.navbar">
-      <div class="nav-brand" :style="s.navBrand">MIROFISH OFFLINE</div>
+      <div class="nav-brand" :style="s.navBrand">AURORA</div>
       <div class="nav-links" :style="s.navLinks">
-        <a href="https://github.com/nikmcfly/MiroFish-Offline" target="_blank" class="github-link" :style="s.githubLink">
-          Visit our Github <span>↗</span>
+        <a href="https://github.com/annamau/aurora" target="_blank" class="github-link" :style="s.githubLink">
+          View on GitHub <span>↗</span>
         </a>
       </div>
     </nav>
@@ -26,7 +26,7 @@
 
           <div class="hero-desc" :style="s.heroDesc">
             <p :style="s.heroDescP">
-              From a single document, <span :style="s.highlightBold">MiroFish Offline</span> extracts reality seeds and builds a parallel world of <span :style="s.highlightOrange">autonomous AI agents</span> — running entirely on your machine. Inject variables, observe emergent behavior, and find <span :style="s.highlightCode">"local optima"</span> in complex social dynamics.
+              <span :style="s.highlightBold">Aurora</span> is an <span :style="s.highlightOrange">offline-first city resilience simulator</span> — upload disaster scenarios and watch a multi-agent swarm of autonomous responders, citizens, and infrastructure nodes react in real time. Powered by <span :style="s.highlightCode">Gemma 4</span> and Neo4j, entirely on your hardware.
             </p>
             <p class="slogan-text" :style="s.sloganText">
               Your data never leaves your machine. The future is simulated locally<span :style="s.blinkingCursor">_</span>
@@ -38,7 +38,16 @@
 
         <div class="hero-right" :style="s.heroRight">
           <div class="logo-container" :style="s.logoContainer">
-            <img src="../assets/logo/MiroFish_logo_left.jpeg" alt="MiroFish Logo" :style="s.heroLogo" />
+            <div :style="s.heroLogo">
+              <div :style="s.wordmark">Aurora</div>
+              <div :style="s.wordmarkAccent">
+                <span :style="s.accentFire"></span>
+                <span :style="s.accentWater"></span>
+                <span :style="s.accentEarth"></span>
+                <span :style="s.accentAir"></span>
+                <span :style="s.accentAether"></span>
+              </div>
+            </div>
           </div>
           <button :style="s.scrollDownBtn" @click="scrollToBottom">↓</button>
         </div>
@@ -174,7 +183,14 @@ const s = reactive({
   decorationSquare: { width: '16px', height: '16px', background: '#FF4500' },
   heroRight: { flex: '0.8', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' },
   logoContainer: { width: '100%', display: 'flex', justifyContent: 'flex-end', paddingRight: '40px' },
-  heroLogo: { maxWidth: '500px', width: '100%' },
+  heroLogo: { maxWidth: '500px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' },
+  wordmark: { fontSize: 'var(--fz-48, 48px)', fontWeight: '700', fontFamily: "'Space Grotesk', sans-serif", color: '#000', lineHeight: '1', letterSpacing: '-2px' },
+  wordmarkAccent: { display: 'flex', width: '100%', height: '6px', marginTop: '8px', gap: '2px' },
+  accentFire: { flex: '1', background: 'var(--el-fire, #F25C1F)', borderRadius: '1px' },
+  accentWater: { flex: '1', background: 'var(--el-water, #33C0FF)', borderRadius: '1px' },
+  accentEarth: { flex: '1', background: 'var(--el-earth, #B68A5F)', borderRadius: '1px' },
+  accentAir: { flex: '1', background: 'var(--el-air, #9FE0CF)', borderRadius: '1px' },
+  accentAether: { flex: '1', background: 'var(--el-aether, #C580F0)', borderRadius: '1px' },
   scrollDownBtn: { width: '40px', height: '40px', border: '1px solid #E5E5E5', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#FF4500', fontSize: '1.2rem' },
   dashboardSection: { display: 'flex', gap: '60px', borderTop: '1px solid #E5E5E5', paddingTop: '60px', alignItems: 'flex-start' },
   leftPanel: { flex: '0.8', display: 'flex', flexDirection: 'column' },
