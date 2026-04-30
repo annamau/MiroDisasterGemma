@@ -11,6 +11,10 @@ import AtomicSandbox from '../views/_AtomicSandbox.vue'
 const routes = [
   {
     path: '/',
+    redirect: '/aurora'
+  },
+  {
+    path: '/legacy/home',
     name: 'Home',
     component: Home
   },

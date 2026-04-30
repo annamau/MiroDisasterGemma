@@ -9,10 +9,14 @@
     "preview": "vite preview",
     "test:tokens": "node --test tests/tokens.test.js",
     "test:components": "vitest run tests/components",
-    "test": "npm run test:tokens && npm run test:components"
+    "test:no-mirofish": "bash tests/d1-mirofish-grep.test.sh",
+    "test": "npm run test:tokens && npm run test:components && npm run test:no-mirofish"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.1.2",
+    "@fontsource-variable/space-grotesk": "^5.1.1",
+    "@fontsource/noto-sans-sc": "^5.1.0",
     "@phosphor-icons/vue": "^2.2.1",
     "axios": "^1.13.2",
     "d3": "^7.9.0",

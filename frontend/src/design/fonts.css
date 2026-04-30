@@ -1,1 +1,8 @@
 @import '@fontsource-variable/inter/opsz.css';
+@import '@fontsource-variable/jetbrains-mono';
+/* Noto Sans SC: Latin-only subsets to keep CSS budget under 40 kB gz.
+   Aurora copy is English; CJK glyphs from this family are unused at runtime.
+   If a latent CJK string ever needs rendering, swap to chinese-simplified-*. */
+@import '@fontsource/noto-sans-sc/latin-400.css';
+@import '@fontsource/noto-sans-sc/latin-700.css';
+@import '@fontsource-variable/space-grotesk';

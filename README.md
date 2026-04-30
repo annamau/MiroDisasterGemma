@@ -45,6 +45,13 @@ The [original MiroFish](https://github.com/666ghj/MiroFish) was built for the Ch
 
 ## Quick Start
 
+<!-- D1: neo4j-volume-reset -->
+> **Existing Neo4j volume?** If you ran an older version of this fork, drop the Neo4j data volume before first boot (the database password changed):
+> ```bash
+> docker volume rm neo4j_data  # only if you have a stale volume
+> ```
+<!-- /D1 -->
+
 ### Prerequisites
 
 - Docker & Docker Compose (recommended), **or**
