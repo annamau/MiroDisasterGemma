@@ -37,7 +37,18 @@ Aurora is a hackathon-scale answer to that gap. It is not a production tool, and
 
 ## What Aurora does
 
-Aurora simulates a single hazard scenario — currently the LA Puente Hills M7.2 reference scenario, with three more scaffolded — through a **multi-agent system** with four agent classes that interact across hours of simulated time:
+Aurora simulates a hazard scenario — the demo ships with **six**, mixing real historical events with one openly mythological closer — through a **multi-agent system** with four agent classes that interact across hours of simulated time:
+
+| Scenario | Hazard | Anchor | Notes |
+|---|---|---|---|
+| 🏔️ LA Puente Hills M7.2 | earthquake | USGS PHBT scenario | reference, 8 districts, 256 buildings |
+| 🌊 Valencia DANA 29-Oct-2024 | flood | AEMET 491 mm Chiva, 230+ deaths | local relevance — what if ES-Alert went 4h earlier? |
+| 🔥 Pompeii AD 79 | wildfire | Sigurdsson et al. ash maps | real geography, seismic-fragility proxy for pyroclastic damage |
+| 💨 Joplin EF5 22-May-2011 | hurricane | NWS Springfield post-event survey | 158 deaths, $2.8 B — deadliest US tornado since 1947 |
+| ✨ Türkiye-Syria M7.8 6-Feb-2023 | earthquake | USGS + Stanford IO misinfo analysis | cross-border (Aleppo, Idlib), modeled with the misinfo-cascade angle |
+| 🌀 Atlantis | earthquake/flood | Plato Timaeus / Critias (mythological) | "fun closer" — flagged simulation_only; not predictive |
+
+Each scenario runs under 30 ms per Monte Carlo trial through the same orchestrator. Total: 1,236 buildings, 41 districts, all four `HazardKind` values exercised.
 
 ```
                     ┌───────────────────────────────┐
