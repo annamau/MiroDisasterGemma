@@ -93,6 +93,26 @@ The user picks any combination from the UI; Aurora runs **N independent paired-t
 
 **Result reveal.** When the run completes, the UI shows an animated CountUp of the best-arm lives saved, a stagger-in grid of per-intervention delta cards, a comparator-table with horizontal mean-bars and CI overlays, and a cumulative-deaths line chart with stroke-dashoffset reveal. All animations respect `prefers-reduced-motion`. Every number on screen comes from the Monte Carlo run — no static fixtures.
 
+## How to read Aurora's numbers (and what they don't mean)
+
+**Aurora ranks interventions. It does not predict absolute deaths.**
+
+This distinction is load-bearing for the demo and for any pilot conversation. Two reasons:
+
+1. **The Monte Carlo design is paired, not predictive.** Trial #5 of the baseline arm shares its RNG seed with trial #5 of every treatment arm. The only thing that changes between paired trials is the policy lever. So even if Aurora's absolute death counts are off, the **delta between arms** — which intervention saved more lives in the same trial — is robust. We bootstrap 1,000 resamples to get 90 % CIs on those deltas.
+
+2. **Our fragility model is approximate.** Aurora's HAZUS-MH 2.1 seismic fragility curves are real and peer-reviewed *for earthquakes*. For floods (Valencia), wildfires (Pompeii), and tornadoes (Joplin), we currently reuse those curves as a damage proxy, because writing real Hazus-FL inundation-depth fragility, ash-load fragility, and EF-scale wind-DI tables is in the [What's next](#whats-next) list, not in this prototype. The **ranking** of interventions is plausible across all hazard kinds; the **absolute death count** for non-earthquake scenarios is a simulator artifact.
+
+**How to phrase Aurora's results** when showing the demo:
+
+| ✅ Good ("relative effect") | ❌ Misleading ("absolute prediction") |
+|---|---|
+| "A 4-h-earlier ES-Alert reduces deaths by ~29 % [27 %–31 % CI]" | "Aurora says 503 more people would be alive" |
+| "Of the three Valencia interventions tested, ground-floor flood-proofing has the tightest CI on lives saved" | "Aurora predicts 1,234 deaths in the next DANA" |
+| "Pre-positioning ambulances in D03 ranks above retrofitting in D02 across 30 paired trials" | "Aurora forecasts 156 deaths if we don't retrofit" |
+
+When a judge asks *"how do you know that's right?"*, the honest answer is: *"We don't know the absolute number is right. We know the relative ranking is, because it's a paired design. Validating the absolute numbers needs real Hazus-FL fragility — that's day 1 of any pilot conversation."*
+
 ## Gemma 4 angle
 
 Aurora is built around Gemma 4's **Apache 2.0** license (independent of and compatible with Aurora's own AGPL-3.0; see [docs/license-decision.md](./docs/license-decision.md)).
@@ -120,6 +140,9 @@ These are scaffolded but not in v1. The current demo runs entirely on text.
 
 Aurora is **fully offline** — no cloud APIs, no Google Fonts CDN, no external dependencies once the models and containers are up. You can disconnect from Wi-Fi after Step 2 and the demo still works.
 
+> **TL;DR**: `ollama pull gemma4:e2b && ollama pull gemma4:e4b && ./start.sh`
+> See [docs/USAGE.md](./docs/USAGE.md) for the full command reference and troubleshooting, and [docs/EXTENDING.md](./docs/EXTENDING.md) for adding scenarios / interventions / agent classes.
+
 **Step 1 — Pull the Gemma 4 models** (~5 GB total):
 
 ```bash
@@ -140,19 +163,27 @@ ollama pull gemma4:e4b
 docker compose up -d        # Neo4j 5.18 + the backend container
 ```
 
-**Step 3 — Run backend + frontend**:
+**Step 3 — Run backend + frontend** (one command):
 
 ```bash
-# Terminal 1
-cd backend && python run.py
-# Expect: "Running on http://0.0.0.0:5001"
-
-# Terminal 2
-cd frontend && npm install && npm run dev
-# Expect: "Local: http://localhost:3000"
+./start.sh           # boots Neo4j + Flask backend + vite dev (hot reload)
+./start.sh prod      # for the recording-quality demo (vite preview)
+./start.sh check     # health-check every endpoint
+./start.sh stop      # kills everything we started
+./start.sh help      # full reference
 ```
 
 Open **http://localhost:3000/aurora?seed=demo** — the page pre-selects the LA M7.2 scenario, three high-impact interventions, and auto-runs the Monte Carlo after a 1-second beat.
+
+If you prefer two terminals:
+
+```bash
+# Terminal 1
+cd backend && python run.py             # Aurora Backend on :5001
+
+# Terminal 2
+cd frontend && npm install && npm run dev   # vite on :3000
+```
 
 > **First run slow?** Run [`python backend/scripts/prewarm_ollama.py`](./backend/scripts/prewarm_ollama.py) at T-30 min to load model weights and KV-cache before recording the demo. Cold-start adds 8–15 seconds to the first response.
 
