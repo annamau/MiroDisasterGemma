@@ -13,7 +13,7 @@ Why this wrapper exists (verified empirically 2026-04-28; see docs/perf-baseline
    decisions, gemma4:e4b for responder dispatch + report synthesis.
 
 This module is the ONE place all Aurora services should call for LLM inference.
-The legacy MiroFish code paths still use openai.ChatCompletions for backwards
+The legacy Aurora code paths still use openai.ChatCompletions for backwards
 compatibility — we don't touch those.
 """
 

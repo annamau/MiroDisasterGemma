@@ -136,58 +136,42 @@ These are scaffolded but not in v1. The current demo runs entirely on text.
 
 **Function calling.** Aurora's `agent_runtime.py` uses tool-use prompts to let agents query the simulation state (current shake intensity in their district, nearest open hospital, etc.). Note: Ollama's tool-call surface is incomplete in some 0.x versions — Aurora falls back to JSON-mode prompting when tool-call mode is unreliable.
 
-## Quickstart
+## Get the demo running in 3 minutes ⚡
 
-Aurora is **fully offline** — no cloud APIs, no Google Fonts CDN, no external dependencies once the models and containers are up. You can disconnect from Wi-Fi after Step 2 and the demo still works.
-
-> **TL;DR**: `ollama pull gemma4:e2b && ollama pull gemma4:e4b && ./start.sh`
-> See [docs/USAGE.md](./docs/USAGE.md) for the full command reference and troubleshooting, and [docs/EXTENDING.md](./docs/EXTENDING.md) for adding scenarios / interventions / agent classes.
-
-**Step 1 — Pull the Gemma 4 models** (~5 GB total):
+Aurora is offline-first: once the models and containers are warm, you can pull the Wi-Fi cable and the demo keeps running. Here's the **one canonical path**:
 
 ```bash
-ollama pull gemma4:e2b
-ollama pull gemma4:e4b
+# 1. Pull Gemma 4 (~5 GB, one-time)
+ollama pull gemma4:e2b && ollama pull gemma4:e4b
+
+# 2. Boot the stack — Neo4j 5.18 + Flask backend + Vite dev
+./start.sh
+
+# 3. Open the demo
+open http://localhost:3000/aurora?seed=demo
 ```
 
-**Step 2 — Spin up infrastructure**:
+**That's it.** The page pre-selects the LA M7.2 scenario, picks three high-impact interventions, and auto-runs the Monte Carlo after a 1-second beat. Watch the bars fill, the agent decision feed scroll, the CountUp land. ⚡
 
 <!-- D1: neo4j-volume-reset -->
-> **Existing Neo4j volume?** If you ran an older version of this project, drop the Neo4j data volume before first boot. The database password changed (the legacy default no longer works), and Neo4j only reads the password on the first boot of a volume — a stale volume will refuse the new credentials:
+> **Re-running an older fork?** Drop the stale Neo4j volume before first boot — the database password changed and Neo4j only reads it on first boot of a fresh volume:
 > ```bash
-> docker volume rm neo4j_data  # only if you have a stale volume from a prior run
+> docker volume rm neo4j_data
 > ```
 <!-- /D1 -->
 
-```bash
-docker compose up -d        # Neo4j 5.18 + the backend container
-```
+### `./start.sh` — the full command set
 
-**Step 3 — Run backend + frontend** (one command):
+| Command | What it does |
+|---|---|
+| `./start.sh` | Dev mode (hot reload). Best for iteration. |
+| `./start.sh prod` | Production build via `vite preview` on port 4173 — use this for the **recording-quality** demo. |
+| `./start.sh prewarm` | Loads Gemma weights + KV cache. **Run this at T-30 min before any recording.** |
+| `./start.sh check` | Health-check every endpoint, report green/red. |
+| `./start.sh stop` | Kill everything we started (leaves Neo4j volume intact). |
+| `./start.sh help` | Full reference. |
 
-```bash
-./start.sh           # boots Neo4j + Flask backend + vite dev (hot reload)
-./start.sh prod      # for the recording-quality demo (vite preview)
-./start.sh check     # health-check every endpoint
-./start.sh stop      # kills everything we started
-./start.sh help      # full reference
-```
-
-Open **http://localhost:3000/aurora?seed=demo** — the page pre-selects the LA M7.2 scenario, three high-impact interventions, and auto-runs the Monte Carlo after a 1-second beat.
-
-If you prefer two terminals:
-
-```bash
-# Terminal 1
-cd backend && python run.py             # Aurora Backend on :5001
-
-# Terminal 2
-cd frontend && npm install && npm run dev   # vite on :3000
-```
-
-> **First run slow?** Run [`python backend/scripts/prewarm_ollama.py`](./backend/scripts/prewarm_ollama.py) at T-30 min to load model weights and KV-cache before recording the demo. Cold-start adds 8–15 seconds to the first response.
-
-See [docs/aurora-demo-script.md](./docs/aurora-demo-script.md) for the full recording recipe.
+Power users / poking at internals — see [docs/USAGE.md](./docs/USAGE.md). Adding new scenarios or interventions — see [docs/EXTENDING.md](./docs/EXTENDING.md). Recording the demo — see [docs/aurora-demo-script.md](./docs/aurora-demo-script.md).
 
 ## Screenshots
 
@@ -214,7 +198,9 @@ All numbers below are measured by the test suite — there is no marketing infla
 | Average per-trial wall (synth) | **~21 ms/trial** | (derived from the 30-trial run) |
 | Regression sentinel — 240 trials with 1 s threshold | **~5 s (XFAIL)** | `test_mc_perf_assertion_is_real` |
 
-**Hardware**: M-series Mac, 16 GB RAM, no GPU acceleration. Synth path means no LLM call in the trial inner loop (the responder-dispatch decisions are deterministic). Real Gemma-4-backed runs are slower per trial (e2b adds ~150–250 ms per population decision) and are validated in the demo recording rather than CI.
+**Hardware**: synth-path numbers above were measured on a stock M-series Mac with 16 GB RAM and no GPU acceleration. Synth path means no LLM call in the trial inner loop (the responder-dispatch decisions are deterministic). Real Gemma-4-backed runs are slower per trial — see the next paragraph.
+
+**Demo target hardware: Mac mini M4 Pro / 64 GB RAM.** This is what the recorded demo runs on. The unified-memory architecture handles `gemma4:e4b` with room to spare; both `gemma4:e2b` and `gemma4:e4b` stay resident in VRAM simultaneously, which is what makes the `?seed=demo` flow land inside the 90-second wall-time target. On smaller dev machines (M-series with ≤16 GB), expect per-call e2b latency to balloon to several seconds and the LLM-driven path to fall back to synth more often. The synth-only path is intentionally robust enough to record a demo on a 16 GB machine if needed — Gemma 4 then drives the population NPC + responder dispatch layers (existing behavior), not the per-trial fatality predictor (which is a roadmap item on smaller hardware).
 
 **Bundle**: 234.72 kB gzip total (JS 204.12 + CSS 30.60 + HTML 0.66), well under the 320 kB ceiling. All four font families (Inter, JetBrains Mono, Noto Sans SC Latin subset, Space Grotesk) are bundled via `@fontsource` — zero CDN calls.
 

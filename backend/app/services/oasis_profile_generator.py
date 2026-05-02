@@ -22,7 +22,7 @@ from ..utils.logger import get_logger
 from .entity_reader import EntityNode
 from ..storage import GraphStorage
 
-logger = get_logger('mirofish.oasis_profile')
+logger = get_logger('aurora.oasis_profile')
 
 
 @dataclass
