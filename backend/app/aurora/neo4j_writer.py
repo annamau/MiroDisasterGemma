@@ -1,7 +1,7 @@
 """
 Aurora -> Neo4j writer.
 
-Persists a Scenario into the same Neo4j instance the legacy MiroFish graph
+Persists a Scenario into the same Neo4j instance the legacy Aurora graph
 lives in, namespaced by `scenario_id`. Mirrors the (:Entity {uuid})
 unique-constraint pattern with composite (scenario_id, *_id) keys.
 

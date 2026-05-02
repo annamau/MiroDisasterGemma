@@ -53,7 +53,7 @@ FOR ()-[r:RELATION]-() ON EACH [r.fact, r.name]
 # =====================================================================
 # Aurora additions — city-resilience digital-twin schema
 # =====================================================================
-# Layered alongside the legacy MiroFish (:Entity, :RELATION) graph so
+# Layered alongside the legacy Aurora (:Entity, :RELATION) graph so
 # both the original opinion-simulation pipeline and the new disaster
 # simulator share one Neo4j instance. All Aurora nodes use scenario_id
 # as their tenant key.
@@ -101,7 +101,7 @@ FOR (d:District) ON (d.scenario_id, d.h3_cell)
 
 # All schema queries to run on startup
 ALL_SCHEMA_QUERIES = [
-    # MiroFish legacy
+    # Aurora legacy
     CREATE_GRAPH_UUID_CONSTRAINT,
     CREATE_ENTITY_UUID_CONSTRAINT,
     CREATE_EPISODE_UUID_CONSTRAINT,

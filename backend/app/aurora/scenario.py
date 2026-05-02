@@ -12,7 +12,7 @@ A scenario is the immutable input to a Monte Carlo simulation:
 `Scenario` aggregates all of the above and is what gets persisted to Neo4j
 (see Neo4jStorage.save_scenario, called from /api/scenario/load).
 
-Why dataclasses, not Pydantic: the rest of MiroFish-Offline avoids Pydantic
+Why dataclasses, not Pydantic: the rest of Aurora avoids Pydantic
 runtime cost; we mirror that for consistency and zero new dependencies.
 """
 
