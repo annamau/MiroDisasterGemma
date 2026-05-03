@@ -114,14 +114,19 @@ function applyBarWidth(armId, pct) {
 async function poll() {
   if (!props.runId) return
   try {
-    const { data } = await auroraApi.getMCProgress(props.scenarioId, props.runId)
-    if (!data?.success) {
-      error.value = data?.error || 'progress fetch failed'
+    // auroraApi.getMCProgress returns the OUTER envelope {success, data: {arms, done, ...}}
+    // because the axios interceptor in api/index.js returns res (= response.data) directly.
+    // The interceptor already rejects when success===false, but we check here as defense-in-depth.
+    const response = await auroraApi.getMCProgress(props.scenarioId, props.runId)
+    if (!response?.success) {
+      // error may live at the envelope root ({success:false, error:'...'}) or inside data
+      error.value = response?.error || response?.data?.error || 'progress fetch failed'
       emit('error', error.value)
       stopPolling()
       return
     }
-    const payload = data.data
+    const payload = response.data
+    // payload is {arms, done, recent_decisions, error}
     armState.value = { ...payload.arms }
     recentDecisions.value = payload.recent_decisions || []
     emit('progress', { arms: payload.arms, recent_decisions: payload.recent_decisions })
@@ -142,11 +147,12 @@ async function poll() {
       stopPolling()
       // Fetch the final result and emit it up
       try {
-        const { data: rdata } = await auroraApi.getMCResult(props.scenarioId, props.runId)
-        if (rdata?.success) {
-          emit('done', rdata.data)
+        const rresponse = await auroraApi.getMCResult(props.scenarioId, props.runId)
+        if (rresponse?.success) {
+          emit('done', rresponse.data)
         } else {
-          error.value = rdata?.error || 'result fetch failed'
+          // mirror getMCProgress: error may live at envelope root or inside data
+          error.value = rresponse?.error || rresponse?.data?.error || 'result fetch failed'
           emit('error', error.value)
         }
       } catch (e) {

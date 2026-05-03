@@ -265,7 +265,7 @@ health_check() {
   else
     local hc
     hc=$(curl -fsS "http://localhost:$BACKEND_PORT/health" 2>/dev/null || echo '{}')
-    if echo "$hc" | grep -q '"status":"ok"'; then
+    if echo "$hc" | grep -qE '"status"[[:space:]]*:[[:space:]]*"ok"'; then
       ok "backend /health: $(echo "$hc")"
     else
       err "backend /health unhealthy: $hc"
@@ -290,7 +290,7 @@ health_check() {
   mc=$(curl -fsS -X POST -H 'Content-Type: application/json' \
     -d '{"intervention_ids":[],"n_trials":1,"n_population_agents":20,"duration_hours":6,"use_llm":false}' \
     "http://localhost:$BACKEND_PORT/api/scenario/la-puente-hills-m72-ref/run_mc" 2>/dev/null || echo '{}')
-  if echo "$mc" | grep -q '"success":true'; then
+  if echo "$mc" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
     ok "LA M7.2 MC smoke: 200"
   else
     err "MC smoke failed"
