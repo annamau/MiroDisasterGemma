@@ -80,6 +80,9 @@ class InterventionOutcome:
     cache_hit_rate: float
     # Raw trial dicts (kept compact; UI gets these for box plot)
     trial_summaries: list[dict[str, Any]]
+    # Full TrialResult objects — used by M3 animation engine to read per-hour
+    # per-district death counts from HourlySnapshot.deaths_by_district.
+    trials: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -249,6 +252,7 @@ def _run_intervention_trials(
             }
             for t in trials
         ],
+        trials=trials,
     )
 
 
@@ -403,6 +407,7 @@ def run_to_dict(run: MonteCarloRun) -> dict[str, Any]:
             "wall_seconds_mean": o.wall_seconds_mean,
             "cache_hit_rate": o.cache_hit_rate,
             "trial_summaries": o.trial_summaries,
+            "trials": [trial_to_dict(t) for t in o.trials],
         }
 
     def delta(d: InterventionDelta) -> dict[str, Any]:

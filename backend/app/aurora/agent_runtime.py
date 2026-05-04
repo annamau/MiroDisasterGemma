@@ -78,6 +78,7 @@ class HourlySnapshot:
     posts_authority: int
     responders_busy: int
     hospital_load_pct: float
+    deaths_by_district: dict[str, int]
 
 
 @dataclass
@@ -369,7 +370,7 @@ def run_trial(
 
     deaths_total = injuries_total = collapsed_total = 0
     economic_total = 0.0
-    deaths_by_district_acc: dict[str, int] = {}
+    deaths_by_district_acc: dict[str, int] = {d.district_id: 0 for d in scenario.districts}
     posts_total = posts_misinfo = posts_authority = 0
     impressions_misinfo = impressions_authority = 0
     timeline: list[HourlySnapshot] = []
@@ -411,7 +412,10 @@ def run_trial(
         collapsed_total += c_h
         economic_total += eco
         for did, v in d_by_dist.items():
-            deaths_by_district_acc[did] = deaths_by_district_acc.get(did, 0) + v
+            # Strict: pre-seeded keys only. If a building's district_id isn't in
+            # scenario.districts, raise KeyError loudly — silent key-injection
+            # would surface as "phantom districts" in M3's map render.
+            deaths_by_district_acc[did] += v
 
         # 3) Infrastructure cascade
         update_infra_state(infra_states, collapse_share,
@@ -480,6 +484,7 @@ def run_trial(
             posts_authority=posts_authority,
             responders_busy=0,    # P3: wire responder dispatch
             hospital_load_pct=round(hosp_load_pct, 3),
+            deaths_by_district=dict(deaths_by_district_acc),
         ))
 
     wall = time.perf_counter() - t0
@@ -518,6 +523,6 @@ def run_trial(
 
 
 def trial_to_dict(t: TrialResult) -> dict[str, Any]:
-    d = asdict(t)
-    d["timeline"] = [asdict(s) for s in t.timeline]
-    return d
+    # asdict() recursively serializes nested dataclasses including HourlySnapshot
+    # entries in `timeline` — no manual second pass needed.
+    return asdict(t)

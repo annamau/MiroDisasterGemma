@@ -311,3 +311,74 @@ def test_responder_generator_yields_finite_resources():
     # Every engine has water; every medic has BLS capacity
     assert all(u.water_gallons > 0 for u in engines)
     assert all(u.paramedic_capacity_per_hr > 0 for u in medics)
+
+
+# ---- M0: deaths_by_district on HourlySnapshot ----
+
+def test_hourly_snapshot_has_deaths_by_district():
+    """M0: HourlySnapshot has deaths_by_district field; populated for every district."""
+    s = scenario_loader.build_la_puente_hills_m72()
+    run = monte_carlo.run_monte_carlo(
+        s, ['evac_d03_30min_early'],
+        n_trials=2, n_population_agents=30, duration_hours=12,
+        llm_call=None,
+    )
+    # The first treated trial's per-hour timeline should have the field.
+    trial = run.interventions[0].trials[0]
+    assert len(trial.timeline) == 12  # one snapshot per hour
+    snap = trial.timeline[6]  # hour 6, mid-run
+    assert hasattr(snap, 'deaths_by_district'), "HourlySnapshot missing deaths_by_district field"
+    # Every scenario district must appear, even at 0
+    expected_districts = {d.district_id for d in s.districts}
+    actual_districts = set(snap.deaths_by_district.keys())
+    assert expected_districts == actual_districts, (
+        f"Mismatch — expected {expected_districts}, got {actual_districts}"
+    )
+
+def test_deaths_by_district_sum_matches_cumulative():
+    """M0: For hour h, sum(deaths_by_district.values()) at h equals deaths_cumulative_h.
+
+    The new field is CUMULATIVE per district (not per-hour delta), so the citywide sum
+    matches deaths_cumulative at the same hour. Verifies internal consistency.
+    """
+    s = scenario_loader.build_la_puente_hills_m72()
+    run = monte_carlo.run_monte_carlo(
+        s, [],  # baseline only
+        n_trials=1, n_population_agents=30, duration_hours=8,
+        llm_call=None,
+    )
+    trial = run.baseline.trials[0]
+    for snap in trial.timeline:
+        district_sum = sum(snap.deaths_by_district.values())
+        assert district_sum == snap.deaths_cumulative, (
+            f"hour {snap.hour}: district_sum={district_sum} but cumulative={snap.deaths_cumulative}"
+        )
+
+def test_zero_deaths_districts_pre_seeded():
+    """M0: A district with zero deaths still appears in deaths_by_district with value 0.
+
+    Uses Pompeii AD79 because its asymmetric hazard footprint (Vesuvius epicenter,
+    radial decay over 6 districts spanning ~22 km) reliably produces ≥1 zero-death
+    district at hour 0 — the LA M7.2 scenario kills in every district even at low
+    n_pop because every district centroid sits inside the high-MMI shake band.
+    """
+    s = scenario_loader.build_pompeii_79()
+    run = monte_carlo.run_monte_carlo(
+        s, [],  # baseline
+        n_trials=1, n_population_agents=20, duration_hours=4,
+        llm_call=None,
+    )
+    trial = run.baseline.trials[0]
+    snap = trial.timeline[0]  # hour 0 - far districts (Misenum, Stabiae) reliably 0
+    # All districts must be present as keys, even at value 0
+    for d in s.districts:
+        assert d.district_id in snap.deaths_by_district, (
+            f"District {d.district_id} missing from deaths_by_district at hour 0"
+        )
+    # Behavioral assertion: with n_pop=20, duration=4, at hour 0 some districts
+    # MUST have 0 deaths — otherwise this test passes vacuously without exercising
+    # the zero-death pre-seed case.
+    assert any(v == 0 for v in snap.deaths_by_district.values()), (
+        "No zero-death districts at hour 0 — test parameters too aggressive "
+        "(n_pop, duration) to exercise the pre-seed contract. Lower them."
+    )
