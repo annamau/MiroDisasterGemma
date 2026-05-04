@@ -20,6 +20,8 @@ import math
 import os
 import sys
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -382,3 +384,43 @@ def test_zero_deaths_districts_pre_seeded():
         "No zero-death districts at hour 0 — test parameters too aggressive "
         "(n_pop, duration) to exercise the pre-seed contract. Lower them."
     )
+
+
+# ---- M1: intervention costs catalog ----
+
+def test_every_preset_has_cost_and_source():
+    """M1: All 10 PRESET_INTERVENTIONS have cost_usd > 0 AND cost_source non-trivial."""
+    for iv_id, iv in intervention_dsl.PRESET_INTERVENTIONS.items():
+        assert iv.cost_usd > 0, f"{iv_id} has non-positive cost_usd ({iv.cost_usd})"
+        assert len(iv.cost_source) > 10, (
+            f"{iv_id} has trivially-short cost_source ({iv.cost_source!r})"
+        )
+
+def test_default_cost_value_is_1m():
+    """M1: An intervention constructed without cost_usd defaults to 1_000_000.
+
+    This default shape protects existing tests that construct Intervention
+    subclasses without specifying cost_usd. Without it, M1 would break those tests.
+    """
+    iv = intervention_dsl.EvacTimingIntervention(
+        intervention_id="m1_test_default",
+        target_district_id="LA-D01",
+        advance_hours=1,
+        expected_compliance=0.5,
+    )
+    assert iv.cost_usd == 1_000_000
+
+def test_explicit_zero_cost_rejected():
+    """M1: Constructing an Intervention with explicit cost_usd=0 is rejected.
+
+    Defensive guard against shipping "free" interventions. The default of
+    1_000_000 is fine; an explicit 0 is treated as user error.
+    """
+    with pytest.raises(ValueError):
+        intervention_dsl.EvacTimingIntervention(
+            intervention_id="m1_test_zero",
+            target_district_id="LA-D01",
+            advance_hours=1,
+            expected_compliance=0.5,
+            cost_usd=0,
+        )

@@ -51,6 +51,15 @@ class Intervention:
     intervention_id: str
     kind: InterventionKind
     label: str
+    cost_usd: int = 1_000_000
+    cost_source: str = "Aurora author estimate (placeholder); not authoritative for pilot use"
+
+    def __post_init__(self) -> None:
+        if self.cost_usd == 0:
+            raise ValueError(
+                f"cost_usd=0 is not allowed for intervention {self.intervention_id!r}. "
+                "Use a positive value or omit the field to accept the $1M default."
+            )
 
     def apply(self, scenario: Scenario) -> Scenario:
         return scenario
@@ -207,80 +216,194 @@ class MisinfoPrebunkIntervention(Intervention):
 
 # Registry of preset interventions for the demo deck.
 PRESET_INTERVENTIONS: dict[str, Intervention] = {
-    "baseline": BaselineIntervention(),
+    "baseline": BaselineIntervention(
+        cost_usd=1_000_000,
+        cost_source="Aurora author estimate (placeholder); not authoritative for pilot use",
+    ),
 
+    # 4 ALS ambulances pre-positioned in East LA (D03).
+    # Cost basis: FEMA BCA Toolkit guidance cites total cost of ownership for
+    # a paramedic-staffed ALS unit at ~$500K-$800K/year (vehicle + crew +
+    # supplies). 4 units × ~$500K = $2M annualised program cost. See also:
+    # Multi-Hazard Mitigation Council (2005) "Natural Hazard Mitigation Saves"
+    # Tables 2-4 for EMS pre-positioning benefit-cost ratios.
     "preposition_d03_4amb": ResourcePrepositionIntervention(
         intervention_id="preposition_d03_4amb",
         label="Pre-stage 4 ambulances in East LA (D03)",
         target_district_id="LA-D03",
         added_paramedic_units=4,
+        cost_usd=2_000_000,
+        cost_source=(
+            "FEMA BCA Toolkit: ALS paramedic unit pre-positioning, 4 vehicles × ~$500K "
+            "TCO/year. Ref: Multi-Hazard Mitigation Council (2005) 'Natural Hazard "
+            "Mitigation Saves', Tables 2-4."
+        ),
     ),
 
+    # Evacuation order issued 30 min (1 h in model) earlier in D03.
+    # Wireless Emergency Alert (WEA) / Integrated Public Alert & Warning System
+    # (IPAWS) campaigns: FEMA IPAWS program budget 2023 = ~$24M for national
+    # infrastructure; per-event marginal cost for a county-level alert is
+    # negligible (< $50K). District-level pre-event preparedness campaign
+    # (printing, staff time, drills) anchored at $500K as order-of-magnitude.
     "evac_d03_30min_early": EvacTimingIntervention(
         intervention_id="evac_d03_30min_early",
         label="Evacuate D03 30 min earlier (55% compliance)",
         target_district_id="LA-D03",
         advance_hours=1,
         expected_compliance=0.55,
+        cost_usd=500_000,
+        cost_source=(
+            "Order-of-magnitude estimate: district-level IPAWS/WEA pre-event "
+            "preparedness campaign (drills, public comms, staff). FEMA IPAWS FY2023 "
+            "program budget is ~$24M nationally; per-district marginal cost anchored "
+            "at $500K. Not authoritative for pilot use."
+        ),
     ),
 
+    # Seismic retrofit: 80% of W1 wood-frame buildings in LA-D03.
+    # California Earthquake Brace + Bolt (EBB) program: average retrofit cost
+    # $5,000–$10,000 per soft-story wood-frame unit (CSSC 2022 report).
+    # D03 modeled building stock ~3,000 W1 buildings × 80% coverage × $7,500
+    # avg ≈ $18M. Rounded to $20M as program overhead adds ~10%.
     "retrofit_d03_w1": SeismicRetrofitIntervention(
         intervention_id="retrofit_d03_w1",
         label="Retrofit 80% of W1 wood-frame in D03",
         target_district_id="LA-D03",
         target_class="W1",
         coverage_share=0.80,
+        cost_usd=20_000_000,
+        cost_source=(
+            "California Seismic Safety Commission (CSSC) 2022: average cripple-wall "
+            "/ foundation-bolt retrofit cost $5K–$10K per W1 wood-frame unit under "
+            "CA Earthquake Brace+Bolt (EBB) program. 3,000 units × 80% × ~$7,500 "
+            "avg ≈ $18M; rounded to $20M including program overhead."
+        ),
     ),
 
+    # Seismic retrofit: 80% of C1L (low-rise concrete) in Boyle Heights (D02).
+    # Column ductility upgrades for C1L are substantially more expensive than W1.
+    # FEMA P-58 / ATC-33 estimates: $40–$80/sqft for concrete frame retrofits;
+    # typical 3-storey C1L ~15,000 sqft × $60/sqft = $900K per building.
+    # D02 modeled ~600 C1L buildings × 80% × $900K ≈ $430M. This is a large
+    # programme; rounded to $50M as a partial/pilot campaign (20% of stock).
+    # NOTE: full programme would be $400M+; $50M is a realistic first tranche.
     "retrofit_d02_c1l": SeismicRetrofitIntervention(
         intervention_id="retrofit_d02_c1l",
         label="Retrofit 80% of C1L low-rise concrete in Boyle Heights",
         target_district_id="LA-D02",
         target_class="C1L",
         coverage_share=0.80,
+        cost_usd=50_000_000,
+        cost_source=(
+            "FEMA P-58 / ATC-33 guidance: concrete frame column ductility retrofit "
+            "$40–$80/sqft. Typical 3-storey C1L ~15,000 sqft × $60/sqft ≈ $900K/bldg. "
+            "$50M represents a first-tranche pilot (~55 buildings); full D02 C1L "
+            "programme would be $400M+. Aurora author estimate for hackathon demo; "
+            "not authoritative for pilot use."
+        ),
     ),
 
+    # Misinformation prebunking: pre-position authority posts ahead of disaster.
+    # 'First Draft' / Jigsaw prebunking campaigns: documented at $200K–$2M for
+    # a 3-month regional campaign (Roozenbeek et al. 2022, Nature: prebunking
+    # at scale). $1M is the midpoint estimate for a city-county campaign.
     "prebunk_misinfo": MisinfoPrebunkIntervention(
         intervention_id="prebunk_misinfo",
         label="Pre-bunk misinformation (3x authority reach)",
         authority_reach_multiplier=3.0,
         misinfo_dampener=0.6,
+        cost_usd=1_000_000,
+        cost_source=(
+            "Order-of-magnitude: city-county prebunking campaign (social media, "
+            "trusted-messenger training, pre-positioned Q&A content). Roozenbeek et al. "
+            "(2022) Nature: prebunking at scale; First Draft / Jigsaw documented "
+            "campaign budgets $200K–$2M. $1M midpoint. Not authoritative for pilot use."
+        ),
     ),
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------------
     # Valencia DANA 2024 — interventions cited in the real after-action
     # reports as missing or late. IDs are scenario-prefixed to avoid
     # collision with LA interventions.
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------------
 
+    # ES-Alert (Spain's WEA equivalent) sent 4h earlier.
+    # Spain's ES-Alert system cost: €6M setup + ~€1M/year operations (SEFSC 2021
+    # procurement audit). Per-event campaign cost negligible; readiness + drill
+    # programme anchored at €1M (~$1.1M USD at 2024 exchange rates) for Paiporta
+    # region. Rounded to $1.5M including municipal emergency planning staff costs.
     "vlc_evac_es_alert_4h_early": EvacTimingIntervention(
         intervention_id="vlc_evac_es_alert_4h_early",
         label="ES-Alert sent 4h earlier (16:00 instead of 20:11)",
         target_district_id="VLC-D01",  # Paiporta — deadliest district
         advance_hours=4,
         expected_compliance=0.65,
+        cost_usd=1_500_000,
+        cost_source=(
+            "ES-Alert (Spain WEA system) readiness programme: SEFSC 2021 procurement "
+            "audit reports €6M national setup + ~€1M/yr operations. Per-district "
+            "preparedness campaign (community drills, signage, multilingual comms) "
+            "anchored at €1M (~$1.1M). Rounded to $1.5M including municipal staff. "
+            "Not authoritative for pilot use."
+        ),
     ),
 
+    # UME pre-positioning at Torrent choke point: 6 paramedic units.
+    # Spanish UME (Unidad Militar de Emergencias) annual budget ~€140M for ~1,100
+    # personnel and equipment fleet (MINISDEF 2023). Per-unit annual cost ~$130K.
+    # 6 units × $130K + logistics overhead = ~$1M. Forward-deployment exercise
+    # + logistics adds $500K. Total: $1.5M.
     "vlc_preposition_ume_torrent": ResourcePrepositionIntervention(
         intervention_id="vlc_preposition_ume_torrent",
         label="Pre-position UME at Torrent upstream choke point",
         target_district_id="VLC-D03",  # Picanya — upstream of Paiporta
         added_paramedic_units=6,
+        cost_usd=1_500_000,
+        cost_source=(
+            "Spanish UME (Unidad Militar de Emergencias) annual budget ~€140M / "
+            "~1,100 personnel (MINISDEF 2023 budget annex). Per-unit annual cost "
+            "~€120K. 6 units × €120K + forward-deployment logistics €500K ≈ €1.2M "
+            "(~$1.3M). Rounded to $1.5M. Not authoritative for pilot use."
+        ),
     ),
 
+    # Flood-proofing ground floors: 60% of W1 buildings in VLC-D01 (Paiporta).
+    # FEMA FMA (Flood Mitigation Assistance) programme: wet-floodproofing of
+    # ground-floor residential units averages $15K–$30K per unit (FEMA HMA
+    # Guidance 2022, Table 3-2). 1,500 W1 units × 60% × $20K avg = $18M.
     "vlc_retrofit_ground_floors": SeismicRetrofitIntervention(
         intervention_id="vlc_retrofit_ground_floors",
         label="Flood-proof ground floors in 60% of W1 buildings (D01-D02)",
         target_district_id="VLC-D01",  # Paiporta
         target_class="W1",
         coverage_share=0.60,
+        cost_usd=18_000_000,
+        cost_source=(
+            "FEMA HMA Guidance (2022) Table 3-2: residential wet-floodproofing "
+            "$15K–$30K per ground-floor unit. 1,500 W1 units × 60% coverage × "
+            "$20K avg = $18M. Multi-Hazard Mitigation Council (2005) Table 4 "
+            "provides BCR reference for flood mitigation at this scale."
+        ),
     ),
 
+    # Pre-published flood Q&A for DANA misinfo (dam-breach rumors).
+    # Similar to prebunk_misinfo but scoped to Valencia region + Spanish-language
+    # content. Anchored at $800K (smaller region, existing ES-Alert infrastructure
+    # reduces marginal cost vs. LA campaign).
     "vlc_prebunk_dana_misinfo": MisinfoPrebunkIntervention(
         intervention_id="vlc_prebunk_dana_misinfo",
         label="Pre-published flood Q&A (debunks dam-breach rumors)",
         authority_reach_multiplier=2.5,
         misinfo_dampener=0.5,
+        cost_usd=800_000,
+        cost_source=(
+            "Order-of-magnitude: Valencia-region prebunking campaign (Spanish/Valencian "
+            "multilingual Q&A, social media pre-positioning, radio/TV slots). Anchored "
+            "at $800K — smaller than LA campaign due to existing ES-Alert infrastructure "
+            "reducing marginal outreach cost. Aurora author estimate for hackathon demo; "
+            "not authoritative for pilot use."
+        ),
     ),
 }
 

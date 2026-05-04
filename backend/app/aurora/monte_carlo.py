@@ -48,7 +48,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from .agent_runtime import TrialResult, run_trial, trial_to_dict
 from .decision_cache import DecisionCache, get_default_cache
-from .intervention_dsl import Intervention, get_intervention
+from .intervention_dsl import Intervention, get_intervention  # noqa: F401 (Intervention re-exported for type hints)
 from .scenario import Scenario
 
 logger = logging.getLogger("aurora.monte_carlo")
@@ -94,7 +94,15 @@ class InterventionDelta:
     injuries_avoided: CIBound
     dollars_saved: CIBound
     misinfo_ratio_change: CIBound
-    cost_per_life_saved_usd: float | None     # if intervention has a cost field
+    # M1 NOTE: cost_per_life_saved_usd is now POPULATED LIVE (was always None
+    # pre-M1). Computed as `intervention.cost_usd / lives_saved.point` when
+    # lives_saved.point > 0; None only when the intervention has zero or
+    # negative lives_saved. M6 (Act 4 ranked report) reads this directly to
+    # sort interventions ascending by cost-effectiveness — no need for
+    # downstream re-computation.
+    cost_per_life_saved_usd: float | None     # post-M1: live-computed (was always None)
+    cost_usd: int = 0
+    cost_source: str = ""
 
 
 @dataclass
@@ -283,6 +291,7 @@ def _paired_delta(
 def _delta_for_intervention(
     baseline: InterventionOutcome,
     treated: InterventionOutcome,
+    intervention: "Intervention",
 ) -> InterventionDelta:
     base_deaths = [s["deaths"] for s in baseline.trial_summaries]
     base_inj = [s["injuries"] for s in baseline.trial_summaries]
@@ -305,6 +314,13 @@ def _delta_for_intervention(
         n=min(baseline.misinfo_ratio.n, treated.misinfo_ratio.n),
     )
 
+    # Compute cost_per_life_saved_usd when the intervention carries cost data
+    # and the mean lives-saved estimate is positive (avoid division-by-zero /
+    # nonsensical negative CPL).
+    cost_per_life: float | None = None
+    if lives.point > 0:
+        cost_per_life = round(intervention.cost_usd / lives.point, 2)
+
     return InterventionDelta(
         intervention_id=treated.intervention_id,
         label=treated.label,
@@ -312,7 +328,9 @@ def _delta_for_intervention(
         injuries_avoided=inj,
         dollars_saved=dollars,
         misinfo_ratio_change=misinfo_change,
-        cost_per_life_saved_usd=None,    # set when interventions carry $$ cost
+        cost_per_life_saved_usd=cost_per_life,
+        cost_usd=intervention.cost_usd,
+        cost_source=intervention.cost_source,
     )
 
 
@@ -357,6 +375,7 @@ def run_monte_carlo(
 
     # 2) Each treatment — same base_seed so trials are paired
     treated: list[InterventionOutcome] = []
+    treated_interventions: list[Intervention] = []
     for iv_id in intervention_ids:
         if iv_id == "baseline":
             continue
@@ -370,9 +389,13 @@ def run_monte_carlo(
             progress_callback=progress_callback,
         )
         treated.append(out)
+        treated_interventions.append(iv)
 
-    # 3) Compute deltas vs baseline (paired)
-    deltas = [_delta_for_intervention(baseline, t) for t in treated]
+    # 3) Compute deltas vs baseline (paired), carrying intervention cost metadata
+    deltas = [
+        _delta_for_intervention(baseline, t, iv)
+        for t, iv in zip(treated, treated_interventions)
+    ]
 
     finished = time.time()
     wall = time.perf_counter() - t0
@@ -419,6 +442,8 @@ def run_to_dict(run: MonteCarloRun) -> dict[str, Any]:
             "dollars_saved": asdict(d.dollars_saved),
             "misinfo_ratio_change": asdict(d.misinfo_ratio_change),
             "cost_per_life_saved_usd": d.cost_per_life_saved_usd,
+            "cost_usd": d.cost_usd,
+            "cost_source": d.cost_source,
         }
 
     return {
