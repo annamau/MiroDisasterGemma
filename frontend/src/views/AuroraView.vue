@@ -33,6 +33,15 @@
       </div>
     </section>
 
+    <!-- 1b. Schematic Map (M2) — shown after a scenario is loaded -->
+    <section v-if="loadedScenario" class="step">
+      <div class="step-head">
+        <span class="step-num">01b</span>
+        <h2>Schematic Map</h2>
+      </div>
+      <SchematicMap :scenario="loadedScenario" />
+    </section>
+
     <!-- 2. Interventions -->
     <section class="step">
       <div class="step-head">
@@ -176,6 +185,7 @@ import HeroNumber from '@/components/aurora/HeroNumber.vue'
 import DeltaCard from '@/components/aurora/DeltaCard.vue'
 import ComparatorTable from '@/components/aurora/ComparatorTable.vue'
 import CumulativeChart from '@/components/aurora/CumulativeChart.vue'
+import SchematicMap from '@/components/aurora/SchematicMap.vue'
 
 const root = ref(null)
 const heroRow = ref(null)
@@ -207,6 +217,10 @@ const mcRun = ref(null)
 const streamRunId = ref(null)
 const runState = ref('idle') // idle | running | done
 const recentDecisions = ref([])
+
+// M2: holds the full loaded scenario object (buildings, districts, facilities)
+// populated by onLoadScenario; drives <SchematicMap>.
+const loadedScenario = ref(null)
 
 // Detect Ollama-not-running so we can offer the "Try without Gemma 4" path.
 const ollamaError = computed(() => {
@@ -383,7 +397,12 @@ async function onLoadScenario() {
   loading.value = true
   errorMsg.value = ''
   try {
-    await auroraApi.loadScenario(selectedScenarioId.value, false)
+    const resp = await auroraApi.loadScenario(selectedScenarioId.value, false)
+    // M2: capture the full scenario object for <SchematicMap>.
+    // resp is already the {success, data} envelope (interceptor at
+    // frontend/src/api/index.js:34 returns res = response.data, so resp IS
+    // the envelope). resp.data is the inner scenario object.
+    if (resp?.data) loadedScenario.value = resp.data
     await loadIndex()
   } catch (e) {
     errorMsg.value = `Load failed: ${e.message}`
@@ -478,6 +497,13 @@ watch([selectedScenarioId, selectedInterventionIds], () => {
     // Keep the result visible but allow a fresh run.
     runState.value = 'idle'
   }
+})
+
+// M2: clear the loaded scenario (and thus the schematic map) when the user
+// picks a different scenario. Without this, the map shows stale data for
+// the previously-loaded scenario while the rest of the UI reflects the new pick.
+watch(selectedScenarioId, () => {
+  loadedScenario.value = null
 })
 
 async function applyDemoSeed() {
