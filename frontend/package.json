@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "test:tokens": "node --test tests/tokens.test.js",
     "test:components": "vitest run tests/components",
+    "test:api": "vitest run tests/api",
     "test:no-mirofish": "bash tests/d1-mirofish-grep.test.sh",
-    "test": "npm run test:tokens && npm run test:components && npm run test:no-mirofish"
+    "test": "npm run test:tokens && npm run test:components && npm run test:api && npm run test:no-mirofish"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
