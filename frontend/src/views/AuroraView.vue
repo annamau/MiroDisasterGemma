@@ -397,11 +397,12 @@ async function onLoadScenario() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const resp = await auroraApi.loadScenario(selectedScenarioId.value, false)
-    // M2: capture the full scenario object for <SchematicMap>.
-    // resp is already the {success, data} envelope (interceptor at
-    // frontend/src/api/index.js:34 returns res = response.data, so resp IS
-    // the envelope). resp.data is the inner scenario object.
+    // M2.1: Use /preview (pure in-memory scenario build, no Neo4j) to
+    // populate the schematic map. The legacy /load route is Neo4j-backed
+    // for graph-tools persistence — not needed for the map. Decoupling
+    // means the demo runs even when Docker / Neo4j aren't up.
+    const resp = await auroraApi.previewScenario(selectedScenarioId.value)
+    // resp is the {success, data} envelope; resp.data is the scenario.
     if (resp?.data) loadedScenario.value = resp.data
     await loadIndex()
   } catch (e) {
@@ -410,6 +411,14 @@ async function onLoadScenario() {
     loading.value = false
   }
 }
+
+// M2.1: auto-preview on scenario selection — no need for a "Refresh DB"
+// click. The map appears as soon as the user picks a scenario.
+watch(selectedScenarioId, async (newId) => {
+  if (!newId) return
+  // The earlier watcher clears loadedScenario; this kicks off a fresh preview.
+  await onLoadScenario()
+})
 
 function toggleIntervention(id) {
   const idx = selectedInterventionIds.value.indexOf(id)
@@ -499,12 +508,9 @@ watch([selectedScenarioId, selectedInterventionIds], () => {
   }
 })
 
-// M2: clear the loaded scenario (and thus the schematic map) when the user
-// picks a different scenario. Without this, the map shows stale data for
-// the previously-loaded scenario while the rest of the UI reflects the new pick.
-watch(selectedScenarioId, () => {
-  loadedScenario.value = null
-})
+// (M2.1 collapsed: the auto-preview watch above replaces both the
+// stale-clear and the explicit "Refresh DB" click. Picking a scenario
+// = loading its preview into the map immediately.)
 
 async function applyDemoSeed() {
   // ?seed=demo prepares the canonical demo: LA M7.2, 3 high-impact

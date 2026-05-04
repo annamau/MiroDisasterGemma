@@ -288,6 +288,29 @@ def load_scenario():
                         "trace": traceback.format_exc()}), 500
 
 
+@scenario_bp.route("/<scenario_id>/preview", methods=["GET"])
+def scenario_preview(scenario_id: str):
+    """Build a reference scenario in memory and return it as JSON.
+
+    Unlike /load (which writes to Neo4j), /preview is a pure read-only
+    builder call — required by the M2 schematic map which only needs
+    buildings/districts/facilities at lat/lon. Decouples the map render
+    from the graph-database availability.
+    """
+    builder = REFERENCE_BUILDERS.get(scenario_id)
+    if builder is None:
+        return jsonify({"success": False,
+                        "error": f"Unknown scenario_id: {scenario_id}"}), 404
+    try:
+        scenario = builder()
+        return jsonify({"success": True, "data": scenario.to_dict()})
+    except Exception as exc:
+        logger.exception("Scenario preview failed for %s", scenario_id)
+        return jsonify({"success": False,
+                        "error": str(exc),
+                        "trace": traceback.format_exc()}), 500
+
+
 @scenario_bp.route("/<scenario_id>/state", methods=["GET"])
 def scenario_state(scenario_id: str):
     driver = _driver()
