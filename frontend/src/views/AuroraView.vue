@@ -1,53 +1,51 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
-  <div class="aurora" :data-active-element="activeElement" ref="root">
-    <header class="hdr">
-      <h1>Aurora <span class="hdr-sub">— Prevention Lab</span></h1>
-      <p class="sub">
-        Pick a city. Pick a hazard. A/B-test civic decisions before they cost
-        anyone. Gemma 4 reasons over disaster-response archetypes per district
-        per phase; HAZUS-MH 2.1 fragility curves drive the physics.
-      </p>
-    </header>
+  <div class="aurora" :data-active-element="activeElement" :data-current-act="currentAct" ref="root">
+    <!-- Acts 0 + 1 are full-bleed brand scenes. Acts 2..5 reuse the legacy
+         per-step scaffolding for now; N3-M6' will replace each in turn. -->
 
-    <!-- 1. Scenario picker -->
-    <section class="step">
-      <div class="step-head">
-        <span class="step-num">01</span>
-        <h2>Scenario</h2>
-      </div>
-      <div v-if="!scenarios.length" class="scenario-grid">
-        <SkeletonCard v-for="n in 4" :key="n" variant="scenario" :height="120" />
-      </div>
-      <div v-else class="scenario-grid">
-        <ScenarioCard
-          v-for="s in enrichedScenarios"
-          :key="s.scenario_id"
-          :scenario="s"
-          :selected="selectedScenarioId === s.scenario_id"
-          @select="selectedScenarioId = $event"
-        />
-      </div>
-      <p v-if="loading" class="muted">Building scenario…</p>
-    </section>
+    <Act0Brief
+      v-if="currentAct === 0"
+      :loading="loading"
+      @continue="goToAct(1)"
+    />
 
-    <!-- 1b. Schematic Map (M2) — shown after a scenario is loaded -->
-    <section v-if="loadedScenario" class="step">
-      <div class="step-head">
-        <span class="step-num">01b</span>
-        <h2>City schematic</h2>
-        <span class="meta">
-          {{ loadedScenario.districts?.length ?? 0 }} districts ·
-          {{ loadedScenario.buildings?.length ?? 0 }} buildings ·
-          {{
-            (loadedScenario.hospitals?.length ?? 0) +
-            (loadedScenario.fire_stations?.length ?? 0) +
-            (loadedScenario.shelters?.length ?? 0)
-          }} responders
-        </span>
-      </div>
-      <SchematicMap :scenario="loadedScenario" />
-    </section>
+    <Act1CityPick
+      v-else-if="currentAct === 1"
+      :scenarios="scenarios"
+      @back="goToAct(0)"
+      @select="onCitySelect"
+    />
+
+    <template v-else>
+      <!-- Acts 2..5 — legacy scaffolding gated by currentAct -->
+      <header class="hdr">
+        <button class="back" @click="goToAct(1)" aria-label="Back to city pick">
+          <span>← Cities</span>
+        </button>
+        <h1>Aurora <span class="hdr-sub">— Prevention Lab</span></h1>
+        <p class="sub">
+          {{ heroSub }}
+        </p>
+      </header>
+
+      <!-- 1b. Schematic Map (Act 2) — visible from Act 2 onward -->
+      <section v-if="currentAct >= 2 && loadedScenario" class="step">
+        <div class="step-head">
+          <span class="step-num">02</span>
+          <h2>City schematic</h2>
+          <span class="meta">
+            {{ loadedScenario.districts?.length ?? 0 }} districts ·
+            {{ loadedScenario.buildings?.length ?? 0 }} buildings ·
+            {{
+              (loadedScenario.hospitals?.length ?? 0) +
+              (loadedScenario.fire_stations?.length ?? 0) +
+              (loadedScenario.shelters?.length ?? 0)
+            }} responders
+          </span>
+        </div>
+        <SchematicMap :scenario="loadedScenario" />
+      </section>
 
     <!-- 2. Interventions -->
     <section class="step">
@@ -174,6 +172,7 @@
         :n-trials="mcRun.n_trials"
       />
     </section>
+    </template>
   </div>
 </template>
 
@@ -193,8 +192,19 @@ import DeltaCard from '@/components/aurora/DeltaCard.vue'
 import ComparatorTable from '@/components/aurora/ComparatorTable.vue'
 import CumulativeChart from '@/components/aurora/CumulativeChart.vue'
 import SchematicMap from '@/components/aurora/SchematicMap.vue'
+import Act0Brief from '@/components/aurora/acts/Act0Brief.vue'
+import Act1CityPick from '@/components/aurora/acts/Act1CityPick.vue'
 
 const root = ref(null)
+// Current act in the Prevention Lab story.
+//   0 = brand intro
+//   1 = city pick
+//   2 = topology + reference scenarios on the map
+//   3 = briefing room (legacy interventions panel until N4 lands)
+//   4 = live sim
+//   5 = Prevention Lab — re-run + compare
+// M7' will URL-bind this via ?act=N. For now it lives only in memory.
+const currentAct = ref(0)
 const heroRow = ref(null)
 const deltaGrid = ref(null)
 const { ctx, gsap } = useGsap(root)
@@ -535,15 +545,53 @@ async function applyDemoSeed() {
   nPopulation.value = 80
   durationHours.value = 24
   useLLM.value = true
-  // Wait for index to load + 1s breathing room so a recorded video has a
-  // visible "page idle" beat before the run kicks off.
+  currentAct.value = 2  // demo skips brand + city pick
   await loadIndex()
   setTimeout(() => {
     if (canRun.value && runState.value === 'idle') onRunMC()
   }, 1000)
 }
 
+// --- Act navigation ---
+function goToAct(n) {
+  currentAct.value = n
+  if (typeof window !== 'undefined') {
+    // Best effort: scroll to top so users don't land mid-page after a jump.
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }
+}
+
+async function onCitySelect(scenarioId) {
+  selectedScenarioId.value = scenarioId
+  // The selectedScenarioId watcher kicks off onLoadScenario(); we just advance
+  // the act so the map renders as soon as the preview lands.
+  goToAct(2)
+}
+
+// Sub-headline for Acts 2..5 — adapts to the selected hazard so judges see
+// the calibrated unit on the page chrome from Act 2 onward.
+const heroSub = computed(() => {
+  const h = loadedScenario.value?.hazard
+  if (!h) {
+    return 'A/B-test civic decisions before they cost anyone.'
+  }
+  const kind = (h.kind ?? '').replace(/_/g, ' ')
+  const mag = h.magnitude ? ` · M${h.magnitude}` : ''
+  return `Reference scenario · ${kind}${mag} · Gemma 4 reasons over archetypes per district per phase.`
+})
+
+// Apply ?act=N from URL on cold load (precursor to M7' full URL driver).
+function applyActFromUrl() {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  const a = parseInt(params.get('act') ?? '', 10)
+  if (Number.isFinite(a) && a >= 0 && a <= 5) {
+    currentAct.value = a
+  }
+}
+
 onMounted(async () => {
+  applyActFromUrl()
   await loadIndex()
   await applyDemoSeed()
 })
@@ -552,13 +600,47 @@ onMounted(async () => {
 <style scoped>
 .aurora {
   --accent: var(--el-aether);
-  padding: var(--sp-8) var(--sp-6);
-  max-width: 1200px;
-  margin: 0 auto;
   color: var(--ink-0);
   background: var(--bg-0);
   min-height: 100vh;
 }
+
+/* Default chrome (Acts 2..5) — narrow with padding */
+.aurora[data-current-act='2'],
+.aurora[data-current-act='3'],
+.aurora[data-current-act='4'],
+.aurora[data-current-act='5'] {
+  padding: var(--sp-8) var(--sp-6);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Acts 0+1 are full-bleed brand canvases — no chrome padding. */
+.aurora[data-current-act='0'],
+.aurora[data-current-act='1'] {
+  padding: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+/* Back-to-cities button (Acts 2..5) */
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  margin-bottom: var(--sp-3);
+}
+.back:hover { color: var(--ink-0); border-color: var(--ink-2); }
 
 .aurora[data-active-element='fire'] { --accent: var(--el-fire); }
 .aurora[data-active-element='water'] { --accent: var(--el-water); }
