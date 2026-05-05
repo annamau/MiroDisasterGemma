@@ -425,3 +425,85 @@ def test_explicit_zero_cost_rejected():
             expected_compliance=0.5,
             cost_usd=0,
         )
+
+
+# ---- G5: /interventions/propose endpoint ----
+
+def _make_test_client():
+    """Flask test client. Wraps create_app so a missing Neo4j daemon
+    doesn't sink the test — the propose endpoint reads only in-memory
+    builders."""
+    from app import create_app  # noqa: E402
+    app = create_app()
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+def test_propose_endpoint_404_unknown_scenario():
+    client = _make_test_client()
+    r = client.post(
+        "/api/scenario/does-not-exist/interventions/propose",
+        json={"baseline": {"deaths": 100}},
+    )
+    assert r.status_code == 404
+    body = r.get_json()
+    assert body["success"] is False
+
+
+def test_propose_endpoint_fallback_returns_catalog_subset(monkeypatch):
+    """When Gemma is unreachable, the endpoint must still return
+    proposals via the deterministic fallback. The demo can never break
+    just because Ollama is down."""
+    from app.services import llm_client as llm_client_mod
+
+    # Force llm_client.get_default_client to raise.
+    def boom(*_a, **_kw):
+        raise RuntimeError("simulated Ollama outage")
+
+    monkeypatch.setattr(llm_client_mod, "get_default_client", boom)
+
+    client = _make_test_client()
+    r = client.post(
+        "/api/scenario/la-puente-hills-m72-ref/interventions/propose",
+        json={
+            "baseline": {
+                "deaths": 412,
+                "injuries": 1820,
+                "economic_loss_usd": 1_400_000_000,
+                "deaths_by_district": {"LA-D03": 240, "LA-D02": 110, "LA-D01": 62},
+                "duration_hours": 24,
+            },
+            "max_proposals": 3,
+        },
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["success"] is True
+    data = body["data"]
+    assert data["model"] == "fallback"
+    assert 1 <= len(data["proposals"]) <= 3
+    # Each proposal references a real catalog entry (not a hallucinated id).
+    valid_ids = set(intervention_dsl.PRESET_INTERVENTIONS.keys())
+    for p in data["proposals"]:
+        assert p["intervention_id"] in valid_ids
+        assert p["intervention_id"] != "baseline"
+        assert isinstance(p["cost_usd"], int)
+        assert p["cost_usd"] > 0
+        assert len(p["rationale"]) <= 140
+
+
+def test_propose_endpoint_caps_max_proposals_at_six():
+    """User-supplied max_proposals must clamp to [1, 6] so a malicious
+    or careless caller can't ask for the full catalog and overrun
+    Gemma's context."""
+    client = _make_test_client()
+    r = client.post(
+        "/api/scenario/la-puente-hills-m72-ref/interventions/propose",
+        json={
+            "baseline": {"deaths": 100, "deaths_by_district": {"LA-D03": 100}},
+            "max_proposals": 99,
+        },
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["data"]["proposals"]) <= 6

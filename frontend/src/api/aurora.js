@@ -23,6 +23,17 @@ export const auroraApi = {
   listInterventions() {
     return service.get('/api/scenario/interventions')
   },
+  // G5/M6': post-baseline, Gemma 4 reads the run report + scenario shape
+  // and proposes targeted interventions from the catalog. Returns
+  //   { proposals: [{intervention_id, label, kind, rationale, cost_usd, cost_source}],
+  //     summary, model, generated_at }
+  // Falls back to deterministic ranking server-side if Gemma is down.
+  proposeInterventions(scenarioId, baseline, maxProposals = 4) {
+    return service.post(
+      `/api/scenario/${scenarioId}/interventions/propose`,
+      { baseline, max_proposals: maxProposals },
+    )
+  },
   runMonteCarlo(scenarioId, payload) {
     return service.post(`/api/scenario/${scenarioId}/run_mc`, payload)
   },

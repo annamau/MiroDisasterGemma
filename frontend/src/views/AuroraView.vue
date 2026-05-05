@@ -90,8 +90,12 @@
           <div class="cfg-inline">
             <label><span>Population</span><input type="number" v-model.number="nPopulation" min="20" max="500" /></label>
             <label><span>Hours</span><input type="number" v-model.number="durationHours" min="6" max="72" /></label>
-            <label class="ck"><input type="checkbox" v-model="useLLM" /><span>Use Gemma 4 e2b</span></label>
+            <label><span>Trials</span><input type="number" v-model.number="nTrials" min="1" max="64" /></label>
           </div>
+          <p class="drawer-cite">
+            <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+            <span>&nbsp;Gemma 4 e2b reasons over each archetype × district × phase. Cached across trials.</span>
+          </p>
         </div>
 
         <div v-if="drawerId === 'responders'" class="drawer-content">
@@ -105,31 +109,6 @@
             <div><dt>Shelters</dt><dd>{{ loadedScenario?.shelters?.length ?? 0 }}</dd></div>
           </dl>
         </div>
-
-        <div v-if="drawerId === 'interventions'" class="drawer-content">
-          <h3 class="drawer-title">
-            <PhShieldCheck :size="16" weight="duotone" color="var(--el-air)" />
-            <span>Interventions</span>
-          </h3>
-          <p class="drawer-blurb">
-            Toggle prevention measures. Each toggle creates a new arm in the
-            Monte Carlo. Lower $/life-saved = better leverage.
-          </p>
-          <div v-if="interventions.length" class="chip-stack">
-            <InterventionChip
-              v-for="iv in enrichedInterventions"
-              :key="iv.intervention_id"
-              :intervention="iv"
-              :selected="selectedInterventionIds.includes(iv.intervention_id)"
-              :disabled="iv.intervention_id === 'baseline'"
-              @toggle="toggleIntervention"
-            />
-          </div>
-          <label class="cfg-trials">
-            <span>Trials per arm</span>
-            <input type="number" v-model.number="nTrials" min="1" max="64" />
-          </label>
-        </div>
       </template>
     </CommandShell>
   </div>
@@ -139,8 +118,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   PhArrowLeft,
+  PhCpu,
   PhFirstAidKit,
-  PhShieldCheck,
   PhUsersThree,
   PhWaveSawtooth,
 } from '@phosphor-icons/vue'
@@ -188,17 +167,19 @@ const reduceMotion = () =>
 // --- State ---
 const scenarios = ref([])
 const selectedScenarioId = ref('la-puente-hills-m72-ref')
+// Interventions are no longer pre-loaded. The baseline run completes
+// first; afterwards Gemma 4 reads the report and proposes targeted
+// interventions to compare in the Prevention Lab. The catalog
+// (`interventions`) and `selectedInterventionIds` keep their shape so
+// the Prevention Lab in M6' can populate them on demand.
 const interventions = ref([])
-const selectedInterventionIds = ref([
-  'preposition_d03_4amb',
-  'evac_d03_30min_early',
-  'retrofit_d03_w1',
-  'prebunk_misinfo',
-])
+const selectedInterventionIds = ref([])
 const nTrials = ref(8)
 const nPopulation = ref(80)
 const durationHours = ref(24)
-const useLLM = ref(false)
+// Gemma 4 is always on. Set during onMounted from `?gemma=off` URL param
+// only as an emergency fallback; the toggle is no longer in the UI.
+const useLLM = ref(true)
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -309,6 +290,9 @@ const railGroups = computed(() => {
     (s?.hospitals?.length ?? 0) +
     (s?.fire_stations?.length ?? 0) +
     (s?.shelters?.length ?? 0)
+  // Pre-sim rail (Acts 2/3) shows ONLY the city's three real assets:
+  // hazard, population, responders. No interventions are pre-loaded —
+  // Gemma proposes them after the baseline run completes (Act 5).
   return [
     {
       id: 'hazard',
@@ -327,16 +311,9 @@ const railGroups = computed(() => {
     {
       id: 'responders',
       label: 'Responders',
-      stat: `${respondersTotal} · ${s?.hospitals?.length ?? 0} hosp · ${s?.fire_stations?.length ?? 0} stn`,
+      stat: `${respondersTotal} responders · ${s?.hospitals?.length ?? 0} hosp`,
       element: 'water',
       icon: 'FirstAidKit',
-    },
-    {
-      id: 'interventions',
-      label: 'Interventions',
-      stat: `${selectedInterventionIds.value.length} selected · ${nTrials.value} trials/arm`,
-      element: 'air',
-      icon: 'ShieldCheck',
     },
   ]
 })
@@ -422,9 +399,10 @@ const totalDollarsSaved = computed(() => bestDelta.value?.dollars_saved_mean ?? 
 const bestDollarsCi = computed(() => bestDelta.value?.dollars_saved_ci ?? null)
 
 // --- Gating ---
-const canRun = computed(
-  () => !!selectedScenarioId.value && selectedInterventionIds.value.length > 0,
-)
+// Baseline runs as soon as a scenario is loaded. Interventions arrive
+// post-run from Gemma's report analysis (M6' Prevention Lab); their
+// selection re-runs additional MC arms in place.
+const canRun = computed(() => !!selectedScenarioId.value)
 
 // --- Actions ---
 async function loadIndex() {
@@ -561,21 +539,16 @@ watch([selectedScenarioId, selectedInterventionIds], () => {
 // = loading its preview into the map immediately.)
 
 async function applyDemoSeed() {
-  // ?seed=demo prepares the canonical demo: LA M7.2, 3 high-impact
-  // interventions, 20 trials, Gemma 4 enabled, auto-run after 1s.
+  // ?seed=demo runs the baseline straight through; interventions are
+  // proposed by Gemma post-run (no longer pre-selected).
   if (typeof window === 'undefined') return
   const params = new URLSearchParams(window.location.search)
   if (params.get('seed') !== 'demo') return
   selectedScenarioId.value = 'la-puente-hills-m72-ref'
-  selectedInterventionIds.value = [
-    'preposition_d03_4amb',
-    'retrofit_d03_w1',
-    'evac_d03_30min_early',
-  ]
+  selectedInterventionIds.value = []
   nTrials.value = 20
   nPopulation.value = 80
   durationHours.value = 24
-  useLLM.value = true
   currentAct.value = 2  // demo skips brand + city pick
   await loadIndex()
   setTimeout(() => {
@@ -620,12 +593,16 @@ watch(currentAct, (n) => {
 }, { immediate: false })
 
 // Apply ?act=N from URL on cold load (precursor to M7' full URL driver).
+// `?gemma=off` is the emergency fallback when Ollama is down at demo time.
 function applyActFromUrl() {
   if (typeof window === 'undefined') return
   const params = new URLSearchParams(window.location.search)
   const a = parseInt(params.get('act') ?? '', 10)
   if (Number.isFinite(a) && a >= 0 && a <= 5) {
     currentAct.value = a
+  }
+  if (params.get('gemma') === 'off') {
+    useLLM.value = false
   }
 }
 
@@ -755,8 +732,32 @@ onMounted(async () => {
 /* ---- Stage ---- */
 .stage-map {
   position: absolute;
-  inset: 0;
+  inset: var(--sp-4);
   display: block;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-0) 80%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 60%, transparent) 100%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ink-0) 4%, transparent),
+    0 24px 48px -16px rgba(0, 0, 0, 0.45);
+}
+/* Subtle paper-grid layer behind the SVG so the city reads as a view,
+   not as chrome that swallowed it. */
+.stage-map::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: 0.35;
+  mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, transparent 80%);
+  pointer-events: none;
 }
 .stage-map :deep(.schematic-map-wrapper) {
   position: absolute;
@@ -766,7 +767,9 @@ onMounted(async () => {
   max-width: none;
   border: none;
   border-radius: 0;
+  background: transparent;
   aspect-ratio: auto;
+  z-index: 1;
 }
 .stage-loading {
   position: absolute;

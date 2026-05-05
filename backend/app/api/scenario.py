@@ -434,6 +434,215 @@ def list_interventions():
     return jsonify({"success": True, "data": {"interventions": out}})
 
 
+@scenario_bp.route("/<scenario_id>/interventions/propose", methods=["POST"])
+def propose_interventions(scenario_id: str):
+    """Ask Gemma 4 to recommend interventions BASED on a baseline run.
+
+    Aurora no longer pre-loads intervention chips in the UI. The flow is:
+        1. user picks city
+        2. baseline MC runs (no interventions)
+        3. this endpoint reads the baseline outcome + scenario shape, asks
+           Gemma 4 to pick the highest-leverage subset from the catalog,
+           and returns chips with per-item rationales
+        4. the Prevention Lab in Act 5 toggles the proposed chips and runs
+           additional MC arms in place to compare yields
+
+    Body shape::
+
+        {
+          "baseline": {
+              "deaths": int, "injuries": int, "economic_loss_usd": float,
+              "deaths_by_district": {district_id: int, ...},
+              "duration_hours": int, "n_population_agents": int
+          },
+          "max_proposals": 3   # default 4, hard-capped at 6
+        }
+
+    Response shape::
+
+        {
+          "success": true,
+          "data": {
+            "proposals": [
+              {
+                "intervention_id": "preposition_d03_4amb",
+                "label": "...",
+                "kind": "...",
+                "rationale": "<≤140 chars from Gemma>",
+                "cost_usd": int,
+                "cost_source": str
+              }, ...
+            ],
+            "summary": "<≤200 chars Gemma analysis>",
+            "model": "gemma4:e4b",
+            "generated_at": <unix_ts>
+          }
+        }
+
+    Falls back to a deterministic ranking (by `cost_usd / max(1, baseline_deaths)`)
+    if Gemma is unavailable, so the demo never breaks.
+    """
+    builder = REFERENCE_BUILDERS.get(scenario_id)
+    if builder is None:
+        return jsonify({"success": False, "error": f"Unknown scenario_id: {scenario_id}"}), 404
+
+    body = request.get_json(silent=True) or {}
+    baseline = body.get("baseline") or {}
+    max_n = max(1, min(int(body.get("max_proposals", 4)), 6))
+
+    scn = builder()
+    deaths = int(baseline.get("deaths", 0))
+    deaths_by_district: dict[str, int] = baseline.get("deaths_by_district", {}) or {}
+    economic_loss = int(baseline.get("economic_loss_usd", 0))
+    duration = int(baseline.get("duration_hours", scn.hazard.duration_hours))
+
+    # Build the prompt context — keep it tight; Gemma 4 e4b at 128K is fine
+    # but the response speed matters for the live demo.
+    catalog = []
+    for iid, iv in PRESET_INTERVENTIONS.items():
+        if iid == "baseline":
+            continue
+        catalog.append({
+            "id": iid,
+            "kind": iv.kind,
+            "label": iv.label,
+            "cost_usd": iv.cost_usd,
+        })
+
+    top_districts = sorted(
+        deaths_by_district.items(), key=lambda kv: kv[1], reverse=True,
+    )[:5]
+    district_summary = ", ".join(
+        f"{did}={n}" for did, n in top_districts
+    ) or "no per-district breakdown"
+
+    system_prompt = (
+        "You are a civic-resilience analyst. Given a city's baseline disaster "
+        "outcome and a fixed catalog of prevention interventions, pick the "
+        "highest-leverage subset that targets the worst-hit districts and the "
+        "biggest loss vectors. Respond with strict JSON: "
+        '{"proposals":[{"intervention_id":<str>,"rationale":<str ≤140 chars>}],'
+        '"summary":<str ≤200 chars>}. '
+        "Pick at most "
+        f"{max_n} interventions. Choose IDs ONLY from the catalog provided."
+    )
+    user_prompt = (
+        f"City: {scn.city}\n"
+        f"Hazard: {scn.hazard.kind} M{scn.hazard.magnitude} "
+        f"epicenter ({scn.hazard.epicenter_lat:.3f},{scn.hazard.epicenter_lon:.3f}), "
+        f"duration {duration}h\n"
+        f"Districts: {len(scn.districts)}; Buildings: {len(scn.buildings)}\n"
+        f"Baseline deaths: {deaths}; injuries: {baseline.get('injuries', 0)}; "
+        f"economic loss: ${economic_loss / 1e6:.0f}M\n"
+        f"Worst districts (deaths): {district_summary}\n"
+        f"Intervention catalog (pick from these IDs):\n"
+    )
+    for c in catalog:
+        user_prompt += f"  - {c['id']} | {c['kind']} | {c['label']} | ${c['cost_usd'] / 1e6:.1f}M\n"
+
+    proposals: list[dict[str, Any]] = []
+    summary = ""
+    model_used = "fallback"
+
+    # Try Gemma first.
+    try:
+        from ..services.llm_client import get_default_client
+        client = get_default_client()
+        # Default to e4b for proposals (better reasoning); fall back to e2b if e4b is missing.
+        for model_name in ("gemma4:e4b", "gemma4:e2b"):
+            try:
+                resp = client.chat_json(
+                    system=system_prompt,
+                    user=user_prompt,
+                    model=model_name,
+                )
+                # chat_json returns either a dict or a JSON string per impl.
+                parsed = resp if isinstance(resp, dict) else _safe_json(resp)
+                raw_proposals = parsed.get("proposals") or []
+                summary = (parsed.get("summary") or "")[:200]
+                for p in raw_proposals[:max_n]:
+                    iid = p.get("intervention_id") or p.get("id")
+                    if not iid or iid not in PRESET_INTERVENTIONS:
+                        continue
+                    iv = PRESET_INTERVENTIONS[iid]
+                    proposals.append({
+                        "intervention_id": iid,
+                        "label": iv.label,
+                        "kind": iv.kind,
+                        "rationale": (p.get("rationale") or "")[:140],
+                        "cost_usd": iv.cost_usd,
+                        "cost_source": iv.cost_source,
+                    })
+                model_used = model_name
+                break
+            except Exception:
+                logger.exception(f"propose: model {model_name} failed; trying next")
+    except Exception:
+        logger.exception("propose: LLM client unavailable; falling back to deterministic ranking")
+
+    # Fallback if Gemma yielded nothing usable: rank catalog by
+    # (cost_usd / per_district_deaths_modeled) — cheapest-per-life-saved
+    # heuristic that targets the worst-hit district when present.
+    if not proposals:
+        worst_did = top_districts[0][0] if top_districts else None
+        ranked = sorted(
+            catalog,
+            key=lambda c: (
+                # Prefer interventions that mention the worst district in their id
+                0 if (worst_did and worst_did.lower().replace("-", "_") in c["id"]) else 1,
+                c["cost_usd"],
+            ),
+        )
+        for c in ranked[:max_n]:
+            iv = PRESET_INTERVENTIONS[c["id"]]
+            rationale = (
+                f"Fallback ranking: cheapest catalog item targeting worst district "
+                f"({worst_did or 'overall'}). Gemma unavailable."
+            )
+            proposals.append({
+                "intervention_id": c["id"],
+                "label": iv.label,
+                "kind": iv.kind,
+                "rationale": rationale[:140],
+                "cost_usd": iv.cost_usd,
+                "cost_source": iv.cost_source,
+            })
+        summary = (
+            "Deterministic fallback (Gemma unavailable). "
+            f"Proposed {len(proposals)} cheapest interventions targeting the worst-hit district."
+        )
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "proposals": proposals,
+            "summary": summary,
+            "model": model_used,
+            "generated_at": int(time.time()),
+        },
+    })
+
+
+def _safe_json(maybe_str: Any) -> dict:
+    """chat_json may return a dict or a string. Parse defensively."""
+    import json
+    if isinstance(maybe_str, dict):
+        return maybe_str
+    if isinstance(maybe_str, str):
+        try:
+            return json.loads(maybe_str)
+        except Exception:
+            # Heuristic: extract first {...} block
+            start = maybe_str.find("{")
+            end = maybe_str.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    return json.loads(maybe_str[start:end + 1])
+                except Exception:
+                    return {}
+    return {}
+
+
 @scenario_bp.route("/<scenario_id>/run_mc", methods=["POST"])
 def run_mc(scenario_id: str):
     """Run a Monte Carlo experiment: N trials per intervention vs baseline.

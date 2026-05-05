@@ -29,17 +29,17 @@
   --el-aether-glow: #b794f4;
 
   /*
-   * Surface neutrals — paper-dark, not pure black. Lifts the
-   * schoolbook brights so they read as illustration, not neon.
+   * Surface neutrals — slate, not pure black. The schoolbook brights
+   * sit on these without burning; the map breathes against them.
    */
-  --bg-0: #0e1217;  /* page */
-  --bg-1: #181d24;  /* panels */
-  --bg-2: #222831;  /* raised */
+  --bg-0: #1a2030;  /* page (deep slate) */
+  --bg-1: #232b3d;  /* panels (rail, topbar) */
+  --bg-2: #2d3649;  /* raised (cards, pills, inputs) */
   --ink-0: #f4f6f8;
-  --ink-1: #a8b0bd;
-  --ink-2: #69727f;
-  --line: #2a313c;
-  --line-glow: rgba(106, 76, 147, 0.22);
+  --ink-1: #b8c0cf;
+  --ink-2: #7c8598;
+  --line: #3a4358;
+  --line-glow: rgba(106, 76, 147, 0.24);
 
   /* Spacing (4px grid) */
   --sp-1: 4px;

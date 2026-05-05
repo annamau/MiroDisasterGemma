@@ -18,17 +18,12 @@
       :aria-label="`Schematic map of ${scenario.city ?? 'scenario'}`"
     >
       <defs>
-        <radialGradient id="auroraVignette" cx="50%" cy="50%" r="65%">
-          <stop offset="0%" stop-color="var(--bg-1)" stop-opacity="1" />
-          <stop offset="100%" stop-color="var(--bg-0)" stop-opacity="1" />
-        </radialGradient>
         <radialGradient :id="hazardGradId" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" :stop-color="hazardColor" stop-opacity="0.45" />
-          <stop offset="60%" :stop-color="hazardColor" stop-opacity="0.12" />
+          <stop offset="0%" :stop-color="hazardColor" stop-opacity="0.32" />
+          <stop offset="55%" :stop-color="hazardColor" stop-opacity="0.08" />
           <stop offset="100%" :stop-color="hazardColor" stop-opacity="0" />
         </radialGradient>
       </defs>
-      <rect :width="VIEW_W" :height="VIEW_H" fill="url(#auroraVignette)" />
 
       <!-- Hazard halo: visualizes the seismic / DANA / etc. epicenter so the
            scene has a center of attention even before animation kicks in.
