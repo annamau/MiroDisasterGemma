@@ -18,9 +18,7 @@
         <template #default="{ viewport }">
           <svg
             class="schematic-map"
-            :width="viewport.w || 0"
-            :height="viewport.h || 0"
-            :viewBox="`0 0 ${viewport.w || 1} ${viewport.h || 1}`"
+            :viewBox="`0 0 ${Math.max(viewport.w || 0, 1)} ${Math.max(viewport.h || 0, 1)}`"
             role="img"
             preserveAspectRatio="none"
             :aria-label="`Schematic map of ${scenario.city ?? 'scenario'}`"
@@ -185,8 +183,11 @@ const hazardLabel = computed(() => {
 .schematic-map {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   display: block;
   pointer-events: none;
+  overflow: visible;
 }
 
 .empty-state {

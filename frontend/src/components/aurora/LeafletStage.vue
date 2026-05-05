@@ -153,6 +153,14 @@ function swapTheme(next) {
 
 onMounted(() => {
   initMap()
+  // Seed viewport on next frame in case the container measured 0×0
+  // during the synchronous initMap() pass (Vue mount before layout).
+  if (typeof requestAnimationFrame !== 'undefined') {
+    requestAnimationFrame(() => {
+      mapInstance?.invalidateSize({ animate: false })
+      bumpVersion()
+    })
+  }
   if (typeof ResizeObserver !== 'undefined' && container.value) {
     const ro = new ResizeObserver(() => {
       mapInstance?.invalidateSize({ animate: false })
