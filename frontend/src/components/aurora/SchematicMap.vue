@@ -31,34 +31,48 @@
       <rect :width="VIEW_W" :height="VIEW_H" fill="url(#auroraVignette)" />
 
       <!-- Hazard halo: visualizes the seismic / DANA / etc. epicenter so the
-           scene has a center of attention even before animation kicks in. -->
-      <g v-if="hazardCenter" data-aurora-hazard-halo>
+           scene has a center of attention even before animation kicks in.
+           If the real epicenter is offshore, the halo sits clamped to the
+           viewport edge with a chevron arrow pointing toward the real
+           position so the geography still reads. -->
+      <g v-if="hazardProjected" data-aurora-hazard-halo>
         <circle
-          :cx="hazardCenter[0]"
-          :cy="hazardCenter[1]"
+          :cx="hazardProjected.x"
+          :cy="hazardProjected.y"
           :r="hazardRadius"
           :fill="`url(#${hazardGradId})`"
         />
         <circle
           class="hazard-pulse"
-          :cx="hazardCenter[0]"
-          :cy="hazardCenter[1]"
+          :cx="hazardProjected.x"
+          :cy="hazardProjected.y"
           :r="hazardRadius * 0.35"
           :stroke="hazardColor"
           stroke-width="1.5"
           fill="none"
-          opacity="0.7"
+          opacity="0.75"
         />
         <circle
           class="hazard-pulse hazard-pulse-2"
-          :cx="hazardCenter[0]"
-          :cy="hazardCenter[1]"
+          :cx="hazardProjected.x"
+          :cy="hazardProjected.y"
           :r="hazardRadius * 0.55"
           :stroke="hazardColor"
           stroke-width="1"
           fill="none"
           opacity="0.45"
         />
+
+        <!-- Off-screen arrow when the real epicenter sits outside the city bbox -->
+        <g v-if="offscreenArrow"
+           :transform="`translate(${offscreenArrow.x}, ${offscreenArrow.y}) rotate(${offscreenArrow.deg})`"
+        >
+          <polygon
+            points="14,0 -6,-7 -2,0 -6,7"
+            :fill="hazardColor"
+            opacity="0.85"
+          />
+        </g>
       </g>
 
       <!-- District pucks (render first so buildings sit on top) -->
@@ -74,6 +88,7 @@
         v-for="building in scenario.buildings"
         :key="building.building_id"
         :building="building"
+        :radius="buildingRadius"
       />
 
       <!-- Responder icons: hospitals -->
@@ -119,7 +134,7 @@
 
 <script setup>
 import { computed, provide } from 'vue'
-import { makeProjection } from '@/design/projection.js'
+import { clampToBox, makeProjection, medianNearestRadius } from '@/design/projection.js'
 import DistrictTile from './map/DistrictTile.vue'
 import Building from './map/Building.vue'
 import ResponderIcon from './map/ResponderIcon.vue'
@@ -134,7 +149,15 @@ const props = defineProps({
 const VIEW_W = 1200
 const VIEW_H = 720
 
-const allPoints = computed(() => {
+/**
+ * Fit the projection to CITY assets only (districts + buildings + facilities).
+ * If we include the hazard epicenter — which can be offshore (Valencia DANA)
+ * or on a fault line dozens of km from town — the bbox stretches and the
+ * city compresses into a corner. The hazard halo is projected separately
+ * and clamped via clampToBox so it stays visible without dragging the
+ * city out of frame.
+ */
+const cityPoints = computed(() => {
   const points = []
   for (const d of props.scenario.districts ?? []) {
     points.push({ lat: d.centroid_lat, lon: d.centroid_lon })
@@ -154,11 +177,32 @@ const allPoints = computed(() => {
   return points
 })
 
-const projectFn = computed(() => makeProjection(allPoints.value, VIEW_W, VIEW_H))
+const projectFn = computed(() => makeProjection(cityPoints.value, VIEW_W, VIEW_H))
 
 provide('project', (...args) => projectFn.value(...args))
 
-const districtRadius = 64
+// District puck radius is derived from the nearest-neighbor distance among
+// projected district centroids — guarantees no two pucks overlap. Clamped
+// to [20, 56] so we don't get cartoon-big single-district scenarios or
+// invisibly-small dense ones.
+const districtRadius = computed(() => {
+  const projected = (props.scenario.districts ?? []).map(d =>
+    projectFn.value(d.centroid_lat, d.centroid_lon),
+  )
+  return medianNearestRadius(projected, 20, 56)
+})
+
+// Building dot radius scales inversely with density. Sparse maps get
+// 3.5px chunky dots, dense ones (256-building LA) get 1.8px. Keeps
+// the schematic legible without aggressive overlap.
+const buildingRadius = computed(() => {
+  const n = (props.scenario.buildings ?? []).length
+  if (n <= 60)  return 3.4
+  if (n <= 120) return 2.8
+  if (n <= 180) return 2.4
+  if (n <= 240) return 2.0
+  return 1.8
+})
 
 const HAZARD_ELEMENT = {
   earthquake: 'earth',
@@ -170,20 +214,30 @@ const HAZARD_ELEMENT = {
 const hazardElement = computed(() => HAZARD_ELEMENT[props.scenario.hazard?.kind] ?? 'aether')
 const hazardColor = computed(() => `var(--el-${hazardElement.value})`)
 
-const hazardCenter = computed(() => {
+/**
+ * Project the hazard epicenter, then clamp to the viewport. If the real
+ * epicenter is offshore or otherwise outside the city bbox, we render the
+ * halo at the clamped position and an arrow pointing at the off-screen
+ * direction so users still understand "the hazard is over there."
+ */
+const hazardProjected = computed(() => {
   const h = props.scenario.hazard
   if (!h || h.epicenter_lat == null || h.epicenter_lon == null) return null
-  const [x, y] = projectFn.value(h.epicenter_lat, h.epicenter_lon)
-  return [x, y]
+  const raw = projectFn.value(h.epicenter_lat, h.epicenter_lon)
+  return clampToBox(raw, VIEW_W, VIEW_H, 40)
 })
 
+// Hazard halo radius: small relative to viewBox so it reads as
+// "the source" not "the entire scene". Decoupled from magnitude beyond
+// the viewport-relative cap; the live sim's choropleth carries severity.
 const hazardRadius = computed(() => {
   const h = props.scenario.hazard
-  if (!h) return 220
+  if (!h) return 90
+  // Magnitude scales the halo modestly: M6 → 70, M7.2 → 95, M7.8 → 110.
   if (h.magnitude) {
-    return Math.min(360, Math.max(140, h.magnitude * 35 + (h.magnitude - 6) * 30))
+    return Math.min(140, Math.max(70, 35 + h.magnitude * 9))
   }
-  return 220
+  return 95
 })
 
 const hazardGradId = computed(() => `hazardGrad-${props.scenario.scenario_id ?? 'sc'}`)
@@ -194,6 +248,19 @@ const hazardLabel = computed(() => {
   const kind = (h.kind ?? '').replace(/_/g, ' ')
   const mag = h.magnitude ? ` M${h.magnitude}` : ''
   return `${kind}${mag}`.trim()
+})
+
+/**
+ * Off-screen direction arrow geometry (only when the hazard is clamped).
+ * Drawn as a 16px chevron inset 6px from the clamped position, rotated
+ * by `theta` so it points toward the real epicenter.
+ */
+const offscreenArrow = computed(() => {
+  const h = hazardProjected.value
+  if (!h || !h.clamped) return null
+  // Convert theta (atan2 result, 0=east) to CSS rotation degrees.
+  const deg = (h.theta * 180) / Math.PI
+  return { x: h.x, y: h.y, deg }
 })
 </script>
 

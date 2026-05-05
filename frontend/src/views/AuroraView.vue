@@ -17,170 +17,138 @@
       @select="onCitySelect"
     />
 
-    <template v-else>
-      <!-- Acts 2..5 — legacy scaffolding gated by currentAct -->
-      <header class="hdr">
-        <button class="back" @click="goToAct(1)" aria-label="Back to city pick">
-          <span>← Cities</span>
+    <CommandShell v-else ref="shellRef">
+      <!-- Topbar: back to cities + city/hazard chip + act indicator -->
+      <template #topbar>
+        <button class="topbar-back" @click="goToAct(1)" aria-label="Back to cities">
+          <PhArrowLeft :size="14" weight="bold" /> <span>Cities</span>
         </button>
-        <h1>Aurora <span class="hdr-sub">— Prevention Lab</span></h1>
-        <p class="sub">
-          {{ heroSub }}
-        </p>
-      </header>
-
-      <!-- 1b. Schematic Map (Act 2) — visible from Act 2 onward -->
-      <section v-if="currentAct >= 2 && loadedScenario" class="step">
-        <div class="step-head">
-          <span class="step-num">02</span>
-          <h2>City schematic</h2>
-          <span class="meta">
-            {{ loadedScenario.districts?.length ?? 0 }} districts ·
-            {{ loadedScenario.buildings?.length ?? 0 }} buildings ·
-            {{
-              (loadedScenario.hospitals?.length ?? 0) +
-              (loadedScenario.fire_stations?.length ?? 0) +
-              (loadedScenario.shelters?.length ?? 0)
-            }} responders
-          </span>
+        <div class="topbar-title">
+          <span class="word">Aurora</span>
+          <span class="div">/</span>
+          <span class="city">{{ loadedScenario?.city ?? 'Loading…' }}</span>
+          <span v-if="hazardLabel" class="haz" :class="`haz-${hazardElement}`">{{ hazardLabel }}</span>
         </div>
-        <SchematicMap :scenario="loadedScenario" />
-      </section>
+        <div class="topbar-actindex">
+          <span class="ai-num">Act {{ currentAct }}</span>
+          <span class="ai-of">of 5</span>
+        </div>
+      </template>
 
-    <!-- 2. Interventions -->
-    <section class="step">
-      <div class="step-head">
-        <span class="step-num">02</span>
-        <h2>Interventions</h2>
-      </div>
-      <div v-if="!interventions.length" class="muted">Loading interventions…</div>
-      <div v-else class="chip-grid">
-        <InterventionChip
-          v-for="iv in enrichedInterventions"
-          :key="iv.intervention_id"
-          :intervention="iv"
-          :selected="selectedInterventionIds.includes(iv.intervention_id)"
-          :disabled="iv.intervention_id === 'baseline'"
-          @toggle="toggleIntervention"
+      <!-- Lateral toolbar: groups events into pills, drawer reveals detail -->
+      <template #rail="{ openDrawer }">
+        <EventRail
+          :groups="railGroups"
+          :active-id="activeDrawerId"
+          :start-disabled="!canRun || loading"
+          @open="(id) => { activeDrawerId = id; openDrawer(id) }"
+          @start="onRunMC"
         />
-      </div>
-      <div class="cfg-row">
-        <label>
-          <span>N trials</span>
-          <input type="number" v-model.number="nTrials" min="1" max="200" />
-        </label>
-        <label>
-          <span>Population</span>
-          <input type="number" v-model.number="nPopulation" min="20" max="500" />
-        </label>
-        <label>
-          <span>Hours</span>
-          <input type="number" v-model.number="durationHours" min="6" max="72" />
-        </label>
-        <label class="ck">
-          <input type="checkbox" v-model="useLLM" />
-          <span>Use Gemma 4 (e2b) for population decisions</span>
-        </label>
-      </div>
-    </section>
+      </template>
 
-    <!-- 3. Run -->
-    <section class="step run-step">
-      <div class="step-head">
-        <span class="step-num">03</span>
-        <h2>Monte Carlo</h2>
-      </div>
-      <RunButton
-        :state="runState"
-        :disabled="!canRun || loading"
-        @click="onRunMC"
-        label="Run Monte Carlo"
-      />
-      <div v-if="errorMsg" class="err">
-        <span>{{ errorMsg }}</span>
-        <button
-          v-if="ollamaError && useLLM"
-          class="btn ghost retry-btn"
-          @click="retryWithoutLLM"
-        >Try without Gemma 4</button>
-      </div>
-    </section>
+      <!-- Stage: full-bleed map (Act 2/3) — Act 4/5 will dock more here later -->
+      <template #stage>
+        <div v-if="loadedScenario" class="stage-map">
+          <SchematicMap :scenario="loadedScenario" />
+        </div>
+        <div v-else class="stage-loading">
+          <div class="loading-pulse"></div>
+          <span>Building scenario…</span>
+        </div>
+      </template>
 
-    <!-- 4. Streaming progress (visible during run) -->
-    <section v-if="streamRunId || runState === 'running'" class="step">
-      <div class="step-head">
-        <span class="step-num">04</span>
-        <h2>Live progress</h2>
-      </div>
-      <div class="streaming-grid">
-        <MCProgressPanel
-          :run-id="streamRunId"
-          :scenario-id="selectedScenarioId"
-          :arms="streamingArms"
-          @done="onStreamDone"
-          @progress="onStreamProgress"
-          @error="onStreamError"
-        />
-        <AgentLogTicker :decisions="recentDecisions" />
-      </div>
-    </section>
+      <!-- Drawer panels: detail per rail group, GSAP slides from rail edge -->
+      <template #drawer="{ drawerId }">
+        <div v-if="drawerId === 'hazard'" class="drawer-content">
+          <h3 class="drawer-title">
+            <PhWaveSawtooth :size="16" weight="duotone" :color="`var(--el-${hazardElement})`" />
+            <span>Hazard</span>
+          </h3>
+          <dl class="kv-list">
+            <div><dt>Kind</dt><dd>{{ loadedScenario?.hazard?.kind ?? '—' }}</dd></div>
+            <div v-if="loadedScenario?.hazard?.magnitude"><dt>Magnitude</dt><dd>M{{ loadedScenario.hazard.magnitude }}</dd></div>
+            <div v-if="loadedScenario?.hazard?.depth_km != null"><dt>Depth</dt><dd>{{ loadedScenario.hazard.depth_km }} km</dd></div>
+            <div><dt>Duration</dt><dd>{{ loadedScenario?.hazard?.duration_hours ?? '—' }} h</dd></div>
+            <div><dt>Districts</dt><dd>{{ loadedScenario?.districts?.length ?? 0 }}</dd></div>
+          </dl>
+          <p class="drawer-cite">
+            Physics: HAZUS-MH 2.1 fragility curves · Omori–Utsu aftershock chain.
+          </p>
+        </div>
 
-    <!-- 5. Result reveal (after MC done) -->
-    <section v-if="mcRun" class="step result-step">
-      <div class="step-head">
-        <span class="step-num">05</span>
-        <h2>Outcome</h2>
-        <span class="meta">
-          N={{ mcRun.n_trials }} trials · duration={{ mcRun.duration_hours }}h ·
-          wall={{ mcRun.wall_seconds?.toFixed?.(1) ?? mcRun.wall_seconds }}s
-        </span>
-      </div>
+        <div v-if="drawerId === 'population'" class="drawer-content">
+          <h3 class="drawer-title">
+            <PhUsersThree :size="16" weight="duotone" color="var(--el-aether)" />
+            <span>Population</span>
+          </h3>
+          <p class="drawer-blurb">
+            <strong>{{ nPopulation }}</strong> agents distributed across
+            <strong>9 archetypes</strong> (eyewitness, coordinator, amplifier,
+            authority, misinformer, conspiracist, helper, helpless, critic).
+            Posting rates vary by phase (acute / coordination / blame).
+          </p>
+          <div class="cfg-inline">
+            <label><span>Population</span><input type="number" v-model.number="nPopulation" min="20" max="500" /></label>
+            <label><span>Hours</span><input type="number" v-model.number="durationHours" min="6" max="72" /></label>
+            <label class="ck"><input type="checkbox" v-model="useLLM" /><span>Use Gemma 4 e2b</span></label>
+          </div>
+        </div>
 
-      <!-- Hero numbers -->
-      <div class="hero-row" ref="heroRow">
-        <HeroNumber
-          :value="totalLivesSaved"
-          label="Lives saved (best intervention)"
-          :ci="bestLivesCi"
-          element="aether"
-        />
-        <HeroNumber
-          :value="totalDollarsSaved"
-          label="Dollars saved (best intervention)"
-          :ci="bestDollarsCi"
-          prefix="$"
-          element="water"
-          :abbrev="true"
-        />
-      </div>
+        <div v-if="drawerId === 'responders'" class="drawer-content">
+          <h3 class="drawer-title">
+            <PhFirstAidKit :size="16" weight="duotone" color="var(--el-water)" />
+            <span>Responders</span>
+          </h3>
+          <dl class="kv-list">
+            <div><dt>Hospitals</dt><dd>{{ loadedScenario?.hospitals?.length ?? 0 }}</dd></div>
+            <div><dt>Fire stations</dt><dd>{{ loadedScenario?.fire_stations?.length ?? 0 }}</dd></div>
+            <div><dt>Shelters</dt><dd>{{ loadedScenario?.shelters?.length ?? 0 }}</dd></div>
+          </dl>
+        </div>
 
-      <!-- Delta cards (per intervention) -->
-      <div class="delta-grid" ref="deltaGrid">
-        <DeltaCard
-          v-for="d in enrichedDeltas"
-          :key="d.intervention_id"
-          :delta="d"
-        />
-      </div>
-
-      <!-- Comparator table -->
-      <ComparatorTable :arms="comparatorArms" />
-
-      <!-- Cumulative chart -->
-      <CumulativeChart
-        :arms="cumulativeArms"
-        :n-trials="mcRun.n_trials"
-      />
-    </section>
-    </template>
+        <div v-if="drawerId === 'interventions'" class="drawer-content">
+          <h3 class="drawer-title">
+            <PhShieldCheck :size="16" weight="duotone" color="var(--el-air)" />
+            <span>Interventions</span>
+          </h3>
+          <p class="drawer-blurb">
+            Toggle prevention measures. Each toggle creates a new arm in the
+            Monte Carlo. Lower $/life-saved = better leverage.
+          </p>
+          <div v-if="interventions.length" class="chip-stack">
+            <InterventionChip
+              v-for="iv in enrichedInterventions"
+              :key="iv.intervention_id"
+              :intervention="iv"
+              :selected="selectedInterventionIds.includes(iv.intervention_id)"
+              :disabled="iv.intervention_id === 'baseline'"
+              @toggle="toggleIntervention"
+            />
+          </div>
+          <label class="cfg-trials">
+            <span>Trials per arm</span>
+            <input type="number" v-model.number="nTrials" min="1" max="64" />
+          </label>
+        </div>
+      </template>
+    </CommandShell>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import {
+  PhArrowLeft,
+  PhFirstAidKit,
+  PhShieldCheck,
+  PhUsersThree,
+  PhWaveSawtooth,
+} from '@phosphor-icons/vue'
 import { auroraApi } from '../api/aurora.js'
 import { useGsap } from '@/design/useGsap'
 import { DUR, EASES } from '@/design/motion'
+import CommandShell from '@/components/aurora/CommandShell.vue'
+import EventRail from '@/components/aurora/EventRail.vue'
 import ScenarioCard from '@/components/aurora/ScenarioCard.vue'
 import InterventionChip from '@/components/aurora/InterventionChip.vue'
 import RunButton from '@/components/aurora/RunButton.vue'
@@ -205,6 +173,10 @@ const root = ref(null)
 //   5 = Prevention Lab — re-run + compare
 // M7' will URL-bind this via ?act=N. For now it lives only in memory.
 const currentAct = ref(0)
+
+// Lateral rail / drawer state
+const shellRef = ref(null)
+const activeDrawerId = ref(null)
 const heroRow = ref(null)
 const deltaGrid = ref(null)
 const { ctx, gsap } = useGsap(root)
@@ -308,6 +280,65 @@ const enrichedInterventions = computed(() =>
 const activeElement = computed(() => {
   const v = SCENARIO_VISUAL[selectedScenarioId.value]
   return v?.element ?? 'aether'
+})
+
+// Hazard chip in the topbar (Acts 2..5)
+const HAZARD_ELEMENT = {
+  earthquake: 'earth',
+  flood: 'water',
+  volcanic: 'fire',
+  tornado: 'air',
+}
+const hazardElement = computed(
+  () => HAZARD_ELEMENT[loadedScenario.value?.hazard?.kind] ?? 'aether',
+)
+const hazardLabel = computed(() => {
+  const h = loadedScenario.value?.hazard
+  if (!h) return null
+  const kind = (h.kind ?? '').replace(/_/g, ' ')
+  const mag = h.magnitude ? ` M${h.magnitude}` : ''
+  return `${kind}${mag}`.trim().toUpperCase()
+})
+
+// Lateral rail groups — each pill is one click-to-reveal section. Stats
+// pull from the loadedScenario when present so judges see real numbers
+// the moment they pick a city.
+const railGroups = computed(() => {
+  const s = loadedScenario.value
+  const respondersTotal =
+    (s?.hospitals?.length ?? 0) +
+    (s?.fire_stations?.length ?? 0) +
+    (s?.shelters?.length ?? 0)
+  return [
+    {
+      id: 'hazard',
+      label: 'Hazard',
+      stat: hazardLabel.value ?? 'Loading…',
+      element: hazardElement.value,
+      icon: 'WaveSawtooth',
+    },
+    {
+      id: 'population',
+      label: 'Population',
+      stat: `${nPopulation.value} agents · 9 archetypes`,
+      element: 'aether',
+      icon: 'UsersThree',
+    },
+    {
+      id: 'responders',
+      label: 'Responders',
+      stat: `${respondersTotal} · ${s?.hospitals?.length ?? 0} hosp · ${s?.fire_stations?.length ?? 0} stn`,
+      element: 'water',
+      icon: 'FirstAidKit',
+    },
+    {
+      id: 'interventions',
+      label: 'Interventions',
+      stat: `${selectedInterventionIds.value.length} selected · ${nTrials.value} trials/arm`,
+      element: 'air',
+      icon: 'ShieldCheck',
+    },
+  ]
 })
 
 // --- Computed: streaming arms list ---
@@ -580,6 +611,14 @@ const heroSub = computed(() => {
   return `Reference scenario · ${kind}${mag} · Gemma 4 reasons over archetypes per district per phase.`
 })
 
+// Lock body scroll when in Acts 2..5 (CommandShell owns the viewport).
+// Acts 0/1 keep normal scroll behavior in case future copy needs it.
+watch(currentAct, (n) => {
+  if (typeof document === 'undefined') return
+  const shellMode = n >= 2 && n <= 5
+  document.body.style.overflow = shellMode ? 'hidden' : ''
+}, { immediate: false })
+
 // Apply ?act=N from URL on cold load (precursor to M7' full URL driver).
 function applyActFromUrl() {
   if (typeof window === 'undefined') return
@@ -592,6 +631,10 @@ function applyActFromUrl() {
 
 onMounted(async () => {
   applyActFromUrl()
+  // Apply scroll lock for the (possibly URL-restored) initial act.
+  if (typeof document !== 'undefined' && currentAct.value >= 2) {
+    document.body.style.overflow = 'hidden'
+  }
   await loadIndex()
   await applyDemoSeed()
 })
@@ -605,14 +648,15 @@ onMounted(async () => {
   min-height: 100vh;
 }
 
-/* Default chrome (Acts 2..5) — narrow with padding */
+/* Acts 2..5 are owned by CommandShell which is position:fixed inset:0;
+   the .aurora wrapper is a passthrough so the shell can size to viewport. */
 .aurora[data-current-act='2'],
 .aurora[data-current-act='3'],
 .aurora[data-current-act='4'],
 .aurora[data-current-act='5'] {
-  padding: var(--sp-8) var(--sp-6);
-  max-width: 1200px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+  margin: 0;
 }
 
 /* Acts 0+1 are full-bleed brand canvases — no chrome padding. */
@@ -647,6 +691,232 @@ onMounted(async () => {
 .aurora[data-active-element='earth'] { --accent: var(--el-earth); }
 .aurora[data-active-element='air'] { --accent: var(--el-air); }
 .aurora[data-active-element='aether'] { --accent: var(--el-aether); }
+
+/* ---- Topbar (Acts 2..5) ---- */
+.topbar-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.topbar-back:hover { color: var(--ink-0); border-color: var(--ink-2); }
+
+.topbar-title {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+.topbar-title .word { font-weight: 700; color: var(--ink-0); }
+.topbar-title .div { color: var(--ink-2); }
+.topbar-title .city { font-weight: 500; color: var(--ink-0); }
+.topbar-title .haz {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--ink-1);
+  margin-left: 6px;
+}
+.haz-earth  { border-color: var(--el-earth); color: var(--el-earth); }
+.haz-water  { border-color: var(--el-water); color: var(--el-water); }
+.haz-fire   { border-color: var(--el-fire);  color: var(--el-fire); }
+.haz-air    { border-color: var(--el-air);   color: var(--el-air); }
+.haz-aether { border-color: var(--el-aether);color: var(--el-aether); }
+
+.topbar-actindex {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  text-transform: uppercase;
+}
+.topbar-actindex .ai-num { color: var(--ink-0); font-weight: 600; }
+
+/* ---- Stage ---- */
+.stage-map {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+.stage-map :deep(.schematic-map-wrapper) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  aspect-ratio: auto;
+}
+.stage-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.loading-pulse {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--el-aether);
+  opacity: 0.4;
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+@keyframes loading-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.35; }
+  50%      { transform: scale(1.1); opacity: 0.8; }
+}
+
+/* ---- Drawer panels ---- */
+.drawer-content { font-size: 13px; color: var(--ink-1); }
+.drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fz-16);
+  color: var(--ink-0);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.drawer-blurb {
+  margin: 0 0 var(--sp-4);
+  line-height: 1.55;
+  color: var(--ink-1);
+  font-size: 13px;
+}
+.drawer-blurb strong { color: var(--ink-0); font-weight: 600; }
+.drawer-cite {
+  margin: var(--sp-4) 0 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.kv-list {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kv-list > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.kv-list dt {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0;
+}
+.kv-list dd {
+  font-size: 13px;
+  color: var(--ink-0);
+  font-weight: 600;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.cfg-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.cfg-inline label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.cfg-inline label.ck {
+  flex-direction: row;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--ink-1);
+}
+.cfg-inline input[type='number'] {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink-0);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.cfg-trials {
+  display: block;
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.cfg-trials input {
+  display: block;
+  margin-top: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--ink-0);
+  font-size: 13px;
+}
+.chip-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chip-stack :deep(.intervention-chip) {
+  width: 100%;
+  justify-content: flex-start;
+}
 
 .hdr {
   margin-bottom: var(--sp-12);

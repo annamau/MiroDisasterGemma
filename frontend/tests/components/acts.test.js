@@ -19,8 +19,8 @@ describe('N2 — Act 0 Brief', () => {
     expect(w.find('.wordmark').text()).toBe('Aurora')
     // Lede must contain the user-quoted bet, with "before" as the em emphasis
     expect(w.find('.lede em').text()).toMatch(/before/i)
-    // CTA reads "Begin briefing"
-    expect(w.find('.cta').text()).toMatch(/begin briefing/i)
+    // CTA reads "Begin" (kept terse — full intro lives in the <details> reveal)
+    expect(w.find('.cta').text()).toMatch(/begin/i)
   })
 
   it('emits "continue" when CTA clicked', async () => {

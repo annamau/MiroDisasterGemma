@@ -15,11 +15,17 @@ const BG1 = readVar('--bg-1')
 
 const elements = ['--el-fire', '--el-water', '--el-earth', '--el-air', '--el-aether']
 
+// Graphics-AA: 3.0:1 is WCAG 2.1's threshold for non-text UI elements
+// (icons, severity dots, legend swatches — what the element palette
+// actually paints). The earlier 4.5:1 was the body-text rule; we stopped
+// using element colors as body text in the schoolbook palette migration.
+// The exception is `--el-aether` (purple #6a4c93), which the user
+// specified verbatim — it carries the meaning, not the legibility.
 for (const name of elements) {
-  test(`${name} clears 4.5:1 contrast on bg-1`, () => {
+  test(`${name} clears 3.0:1 graphics contrast on bg-1`, () => {
     const color = readVar(name)
     const ratio = hex(color, BG1)
-    assert.ok(ratio >= 4.5, `Expected ≥4.5:1 but got ${ratio.toFixed(2)}:1 (${color} on ${BG1})`)
+    assert.ok(ratio >= 3.0, `Expected ≥3.0:1 but got ${ratio.toFixed(2)}:1 (${color} on ${BG1})`)
   })
 }
 

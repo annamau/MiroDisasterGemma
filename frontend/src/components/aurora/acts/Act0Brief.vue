@@ -7,44 +7,49 @@
       <span v-for="b in MMI_BINS" :key="b.label" :style="{ background: `var(${b.token})` }"></span>
     </div>
 
-    <div class="brief-stack">
-      <div class="kicker">
+    <div class="brief-stack" data-anim="brief-stack">
+      <div class="kicker" data-anim>
         <PhCompass :size="16" weight="duotone" color="var(--el-aether)" />
-        <span>City Resilience Prevention Lab</span>
+        <span>Prevention Lab</span>
       </div>
 
-      <h1 class="wordmark">Aurora</h1>
+      <h1 class="wordmark" data-anim>Aurora</h1>
 
-      <p class="lede">
-        Pick a city. Pick a hazard. A/B-test civic decisions <em>before</em> they
-        cost anyone.
+      <p class="lede" data-anim>
+        Stop disasters <em>before</em> they hit.
       </p>
 
-      <p class="dek">
-        Aurora runs Gemma 4 against disaster-response archetypes per district per
-        phase, layered on HAZUS-MH 2.1 fragility curves, NOAA-SLOSH depth proxies,
-        Fujita-derived wind intensities, and Omori–Utsu aftershock chains.
-      </p>
-
-      <button class="cta" :disabled="loading" @click="$emit('continue')">
-        <span>Begin briefing</span>
+      <button
+        class="cta"
+        :disabled="loading"
+        data-anim
+        @click="$emit('continue')"
+      >
+        <span>Begin</span>
         <PhArrowRight :size="20" weight="bold" />
       </button>
 
-      <ul class="meta-row">
-        <li><PhBuildings :size="14" weight="duotone" color="var(--el-water)" /> 3 cities</li>
-        <li><PhWaveSawtooth :size="14" weight="duotone" color="var(--el-fire)" /> 6 reference hazards</li>
-        <li><PhCpu :size="14" weight="duotone" color="var(--el-aether)" /> Gemma 4 e2b · cached</li>
-        <li><PhCertificate :size="14" weight="duotone" color="var(--ink-1)" /> Apache 2.0</li>
-      </ul>
+      <!-- Hover-reveal: scale + provenance shown only when user wants it -->
+      <details class="more" data-anim>
+        <summary><PhCaretDown :size="12" weight="bold" /> What's inside</summary>
+        <ul class="meta-row">
+          <li><PhBuildings :size="14" weight="duotone" color="var(--el-water)" /> 3 cities · 6 reference hazards</li>
+          <li><PhCpu :size="14" weight="duotone" color="var(--el-aether)" /> Gemma 4 e2b · 9 archetypes · cached</li>
+          <li><PhWaveSawtooth :size="14" weight="duotone" color="var(--el-fire)" /> HAZUS-MH 2.1 fragility · Omori–Utsu</li>
+          <li><PhCertificate :size="14" weight="duotone" color="var(--ink-1)" /> Apache 2.0</li>
+        </ul>
+      </details>
     </div>
   </section>
 </template>
 
 <script setup>
+import { onMounted, ref } from 'vue'
+import gsap from 'gsap'
 import {
   PhArrowRight,
   PhBuildings,
+  PhCaretDown,
   PhCertificate,
   PhCompass,
   PhCpu,
@@ -58,6 +63,40 @@ defineEmits(['continue'])
 // USGS MMI bins for the bottom scale stripe — purely decorative here,
 // but it primes the visual lexicon used in Act 4.
 const MMI_BINS = bins('earthquake')
+
+// Entrance choreography: data-anim children stagger up.
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  if (reduceMotion) return
+  const items = document.querySelectorAll('.act-brief [data-anim]')
+  if (!items.length) return
+  gsap.from(items, {
+    y: 18,
+    opacity: 0,
+    duration: 0.55,
+    ease: 'power3.out',
+    stagger: 0.08,
+  })
+  // Wordmark pulses in slightly larger then settles
+  const wm = document.querySelector('.act-brief .wordmark')
+  if (wm) {
+    gsap.from(wm, {
+      scale: 1.08,
+      duration: 0.9,
+      ease: 'power2.out',
+    })
+  }
+  // MMI scale stripe: cells light up left to right
+  gsap.from('.act-brief .mmi-stripe span', {
+    scaleY: 0,
+    transformOrigin: 'bottom',
+    duration: 0.5,
+    ease: 'power2.out',
+    stagger: 0.05,
+    delay: 0.4,
+  })
+})
 </script>
 
 <style scoped>
@@ -170,20 +209,42 @@ const MMI_BINS = bins('earthquake')
 .cta:focus-visible { outline: 2px solid var(--ink-0); outline-offset: 3px; }
 .cta:disabled { opacity: 0.5; cursor: wait; }
 
-.meta-row {
-  list-style: none;
-  margin: var(--sp-4) 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-4);
+.more {
+  margin-top: var(--sp-4);
+  align-self: flex-start;
   font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-2);
 }
-.meta-row li { display: inline-flex; align-items: center; gap: 5px; }
+.more summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 0;
+}
+.more summary::-webkit-details-marker { display: none; }
+.more summary:hover { color: var(--ink-1); }
+.more[open] summary svg { transform: rotate(180deg); }
+.more summary svg { transition: transform 0.2s ease; }
+
+.meta-row {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-2);
+}
+.meta-row li { display: inline-flex; align-items: center; gap: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   .cta { transition: none; }

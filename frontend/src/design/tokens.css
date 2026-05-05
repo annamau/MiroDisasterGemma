@@ -1,25 +1,45 @@
 :root {
-  /* Element palette */
-  --el-fire: #F25C1F;
-  --el-fire-glow: #FF7A47;
-  --el-water: #33C0FF;
-  --el-water-glow: #33C0FF;
-  --el-earth: #B68A5F;
-  --el-earth-glow: #C99B6E;
-  --el-air: #9FE0CF;
-  --el-air-glow: #9FE0CF;
-  --el-aether: #C580F0;
-  --el-aether-glow: #C580F0;
+  /*
+   * Aurora "schoolbook" palette
+   *   Source: #ff595e #ffca3a #8ac926 #1982c4 #6a4c93
+   *   Reads as: civic / institutional / informational, not neon-game.
+   *
+   * Mapping to Aurora's element semantics (kept stable so existing
+   * scenario-element bindings still work):
+   *   fire   = red    → severity / hazards / danger
+   *   earth  = yellow → ground shaking / caution
+   *   air    = green  → fresh / safe / wind / "all-clear"
+   *   water  = blue   → flood / hospitals / cool tones
+   *   aether = purple → people / agents / Gemma reasoning
+   */
+  --el-fire:    #ff595e;
+  --el-fire-glow: #ff8488;
+  --el-earth:   #ffca3a;
+  --el-earth-glow: #ffd96b;
+  --el-air:     #8ac926;
+  --el-air-glow: #a8de4f;
+  --el-water:   #1982c4;
+  --el-water-glow: #4ea3d8;
+  /* Aether is the user palette's deepest shade (#6a4c93). On dark bg-1
+     it falls below the 3:1 graphics threshold, so the visible accent is
+     a tint that carries the same hue, and #6a4c93 is reserved for solid
+     fills against light surfaces (tooltip cards, legend chips). */
+  --el-aether:  #8e6db8;
+  --el-aether-deep: #6a4c93;
+  --el-aether-glow: #b794f4;
 
-  /* Surface neutrals */
-  --bg-0: #080A12;
-  --bg-1: #10131F;
-  --bg-2: #1A1E2E;
-  --ink-0: #F5F7FB;
-  --ink-1: #9CA3B5;
-  --ink-2: #5A6075;
-  --line: #252A3D;
-  --line-glow: rgba(197, 128, 240, 0.18);
+  /*
+   * Surface neutrals — paper-dark, not pure black. Lifts the
+   * schoolbook brights so they read as illustration, not neon.
+   */
+  --bg-0: #0e1217;  /* page */
+  --bg-1: #181d24;  /* panels */
+  --bg-2: #222831;  /* raised */
+  --ink-0: #f4f6f8;
+  --ink-1: #a8b0bd;
+  --ink-2: #69727f;
+  --line: #2a313c;
+  --line-glow: rgba(106, 76, 147, 0.22);
 
   /* Spacing (4px grid) */
   --sp-1: 4px;

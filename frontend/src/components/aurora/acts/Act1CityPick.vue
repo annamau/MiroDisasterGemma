@@ -1,15 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <section class="act act-city-pick" data-aurora-act="1">
-    <header class="hd">
+    <header class="hd" data-anim>
       <button class="back" @click="$emit('back')" :aria-label="'Back to brief'">
         <PhArrowLeft :size="14" weight="bold" /> <span>Back</span>
       </button>
       <h2>Pick a city</h2>
-      <p class="dek">
-        Each card opens a calibrated reference scenario: real geography, real
-        population, hazard parameters anchored to the historical event.
-      </p>
     </header>
 
     <div class="grid">
@@ -19,6 +15,7 @@
         class="city-card"
         :class="`element-${s.element}`"
         :data-scenario="s.scenario_id"
+        data-anim="card"
         @click="$emit('select', s.scenario_id)"
         :aria-label="`Open ${s.label}`"
       >
@@ -28,18 +25,19 @@
         </div>
         <div class="card-mid">
           <div class="city-name">{{ s.cityName }}</div>
-          <div class="hazard-name">{{ s.label }}</div>
+          <div class="hazard-name">{{ s.hazardChip }}</div>
         </div>
-        <ul class="card-stats">
-          <li>
+        <!-- Hover-reveal: stats appear only on hover/focus (less visible text upfront) -->
+        <div class="hover-stats">
+          <span class="hs-row">
             <PhUsersThree :size="12" weight="duotone" color="var(--ink-2)" />
             <span>{{ s.populationLabel }}</span>
-          </li>
-          <li>
-            <PhWaveSawtooth :size="12" weight="duotone" :color="`var(--el-${s.element})`" />
-            <span>{{ s.hazardChip }}</span>
-          </li>
-        </ul>
+          </span>
+          <span class="hs-row">
+            <PhArrowRight :size="11" weight="bold" :color="`var(--el-${s.element})`" />
+            <span>Open briefing</span>
+          </span>
+        </div>
       </button>
     </div>
 
@@ -76,9 +74,11 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import gsap from 'gsap'
 import {
   PhArrowLeft,
+  PhArrowRight,
   PhBuildings,
   PhCloudRain,
   PhFlame,
@@ -164,6 +164,30 @@ const primaryCities = computed(() =>
 const extraCities = computed(() =>
   enriched.value.filter(s => !PRIMARY_IDS.includes(s.scenario_id)),
 )
+
+// Entrance choreography: header drops in, then cards stagger from below.
+function playEntrance() {
+  if (typeof window === 'undefined') return
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  if (reduceMotion) return
+  const head = document.querySelector('.act-city-pick [data-anim]')
+  const cards = document.querySelectorAll('.act-city-pick [data-anim="card"]')
+  if (head) gsap.from(head, { y: 14, opacity: 0, duration: 0.45, ease: 'power3.out' })
+  if (cards.length) {
+    gsap.from(cards, {
+      y: 24,
+      opacity: 0,
+      duration: 0.55,
+      ease: 'power3.out',
+      stagger: 0.1,
+      delay: 0.15,
+    })
+  }
+}
+
+onMounted(playEntrance)
+// Re-play if scenarios load asynchronously after mount.
+watch(() => primaryCities.value.length, (n) => { if (n > 0) playEntrance() })
 </script>
 
 <style scoped>
@@ -265,21 +289,33 @@ const extraCities = computed(() =>
   color: var(--ink-1);
 }
 
-.card-stats {
-  list-style: none;
-  margin: 0;
+.hover-stats {
+  margin-top: var(--sp-3);
   padding-top: var(--sp-3);
   border-top: 1px solid var(--line);
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+.city-card:hover .hover-stats,
+.city-card:focus-visible .hover-stats {
+  opacity: 1;
+  transform: translateY(0);
+}
+.hs-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--ff-mono);
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-2);
 }
-.card-stats li { display: inline-flex; align-items: center; gap: 5px; }
 
 .show-more { margin-top: var(--sp-8); }
 .show-more summary {
