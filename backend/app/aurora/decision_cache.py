@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Decision cache — make Monte Carlo on a laptop feasible.
 

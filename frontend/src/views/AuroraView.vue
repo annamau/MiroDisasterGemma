@@ -1,10 +1,12 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div class="aurora" :data-active-element="activeElement" ref="root">
     <header class="hdr">
-      <h1>Aurora <span class="hdr-sub">— City Resilience Digital Twin</span></h1>
+      <h1>Aurora <span class="hdr-sub">— Prevention Lab</span></h1>
       <p class="sub">
-        Pick a hazard scenario, toggle prevention interventions, run a Monte
-        Carlo. Lives saved and dollars saved with 90% confidence intervals.
+        Pick a city. Pick a hazard. A/B-test civic decisions before they cost
+        anyone. Gemma 4 reasons over disaster-response archetypes per district
+        per phase; HAZUS-MH 2.1 fragility curves drive the physics.
       </p>
     </header>
 
@@ -26,18 +28,23 @@
           @select="selectedScenarioId = $event"
         />
       </div>
-      <div class="step-actions">
-        <button class="btn ghost" :disabled="loading" @click="onLoadScenario">
-          {{ loading ? 'Loading…' : 'Refresh DB' }}
-        </button>
-      </div>
+      <p v-if="loading" class="muted">Building scenario…</p>
     </section>
 
     <!-- 1b. Schematic Map (M2) — shown after a scenario is loaded -->
     <section v-if="loadedScenario" class="step">
       <div class="step-head">
         <span class="step-num">01b</span>
-        <h2>Schematic Map</h2>
+        <h2>City schematic</h2>
+        <span class="meta">
+          {{ loadedScenario.districts?.length ?? 0 }} districts ·
+          {{ loadedScenario.buildings?.length ?? 0 }} buildings ·
+          {{
+            (loadedScenario.hospitals?.length ?? 0) +
+            (loadedScenario.fire_stations?.length ?? 0) +
+            (loadedScenario.shelters?.length ?? 0)
+          }} responders
+        </span>
       </div>
       <SchematicMap :scenario="loadedScenario" />
     </section>

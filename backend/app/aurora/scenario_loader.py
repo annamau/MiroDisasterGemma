@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Aurora scenario loader — bake a defensible reference scenario from public data.
 

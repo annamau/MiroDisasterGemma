@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div ref="root" class="agent-log-ticker" aria-live="polite" aria-atomic="false">
     <div class="ticker-header">

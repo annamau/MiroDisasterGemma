@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Aurora /api/scenario endpoints — load + inspect city-resilience scenarios
 + Monte Carlo intervention runner.

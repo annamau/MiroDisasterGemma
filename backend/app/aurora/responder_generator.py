@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Responder generator — fire/EMS/police agents from scenario fire stations.
 

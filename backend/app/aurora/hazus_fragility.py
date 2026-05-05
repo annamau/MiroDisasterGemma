@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Aurora hazard physics — HAZUS-MH fragility curves for earthquake building damage.
 

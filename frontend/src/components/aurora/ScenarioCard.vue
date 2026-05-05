@@ -1,7 +1,8 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div
     class="scenario-card"
-    :class="[`element-${scenario.element}`, { selected, 'not-loaded': !scenario.loaded_in_db }]"
+    :class="[`element-${scenario.element}`, { selected }]"
     role="button"
     tabindex="0"
     :aria-pressed="selected"
@@ -19,12 +20,6 @@
       <div class="text-col">
         <div class="label">{{ scenario.label }}</div>
         <div class="sub" v-if="scenario.sub">{{ scenario.sub }}</div>
-        <span
-          class="db-badge"
-          :class="scenario.loaded_in_db ? 'ok' : 'off'"
-        >
-          {{ scenario.loaded_in_db ? 'in DB' : 'not loaded' }}
-        </span>
       </div>
     </div>
     <div class="hazard-row" v-if="hazardEntries.length">
@@ -173,23 +168,6 @@ const hazardEntries = computed(() => {
   color: var(--ink-1);
   margin-top: 2px;
   line-height: 1.4;
-}
-
-.db-badge {
-  display: inline-block;
-  margin-top: var(--sp-1);
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 500;
-}
-.db-badge.ok {
-  background: rgba(51, 192, 255, 0.15);
-  color: var(--el-water);
-}
-.db-badge.off {
-  background: rgba(90, 96, 117, 0.2);
-  color: var(--ink-2);
 }
 
 /* Hazard params row */

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div ref="root" class="mc-progress-panel" role="status" aria-live="polite">
     <div class="panel-header">

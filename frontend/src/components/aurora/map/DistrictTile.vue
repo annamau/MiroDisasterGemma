@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <g data-aurora-district :transform="`translate(${cx}, ${cy})`">
     <!-- Circular puck: fill bg-2 at 90% alpha, 1px stroke ink-2 -->

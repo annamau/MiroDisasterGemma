@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <!-- 16×16 SVG group centered at the projected facility lat/lon -->
   <g

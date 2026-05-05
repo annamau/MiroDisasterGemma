@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <figure ref="root" class="cumulative-chart">
     <figcaption class="chart-title">{{ title }}</figcaption>

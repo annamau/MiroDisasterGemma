@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Population generator — sample archetype-tagged residents for an Aurora scenario.
 

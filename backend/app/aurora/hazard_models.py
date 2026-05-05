@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Hazard time-evolution models — Omori aftershocks + infrastructure cascade.
 

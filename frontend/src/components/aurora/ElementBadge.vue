@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <span class="element-badge" :style="badgeStyle" :aria-label="`${element} element icon`">
     <component :is="iconComponent" :size="size" :color="elementColor" :weight="iconWeight" />

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Aurora scenario domain — Pydantic-style dataclasses for a city-resilience scenario.
 

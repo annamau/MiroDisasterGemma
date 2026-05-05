@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Intervention DSL — the "what if" toggles cities, agencies, and insurers
 turn on to compute prevention deltas.

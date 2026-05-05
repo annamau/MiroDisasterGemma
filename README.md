@@ -6,7 +6,7 @@
 
 *Cities can't experiment on real residents. Aurora lets them experiment on simulated ones.*
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square)](./LICENSE)
+[![License: Apache-2.0 (Aurora) / AGPL-3.0 (legacy)](https://img.shields.io/badge/License-Apache--2.0%20%2F%20AGPL--3.0-blue?style=flat-square)](./LICENSE-MAP.md)
 [![Gemma 4](https://img.shields.io/badge/Gemma-4-4285F4?style=flat-square&logo=google&logoColor=white)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vue.js&logoColor=white)](https://vuejs.org/)
@@ -115,7 +115,7 @@ When a judge asks *"how do you know that's right?"*, the honest answer is: *"We 
 
 ## Gemma 4 angle
 
-Aurora is built around Gemma 4's **Apache 2.0** license (independent of and compatible with Aurora's own AGPL-3.0; see [docs/license-decision.md](./docs/license-decision.md)).
+Aurora is built around Gemma 4's **Apache 2.0** license. The Aurora subset itself ships under Apache 2.0 (see [LICENSE-MAP.md](./LICENSE-MAP.md) and [docs/aurora-license-audit.md](./docs/aurora-license-audit.md)).
 
 **Tiered model routing** ([backend/app/config.py:38-39](./backend/app/config.py)):
 
@@ -288,9 +288,16 @@ The full hostile-review trail (v1 plan → 6 red-team findings → v2 hardened p
 
 ## License
 
-This project is licensed under [AGPL-3.0](./LICENSE). See [docs/license-decision.md](./docs/license-decision.md) for the reasoning behind staying on AGPL.
+This repository is **dual-licensed**:
 
-**Gemma 4** is licensed under [Apache 2.0](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/). Aurora calls Gemma 4 as a service via Ollama — no Gemma 4 source code is incorporated into this codebase. The two licenses are independent and compatible.
+- The **Aurora subset** (`backend/app/aurora/**`, `backend/app/api/scenario.py`, `frontend/src/{api/aurora.js, components/aurora/**, views/AuroraView.vue, design/**}`, related tests, and `docs/aurora-*.md`) is licensed under [Apache License 2.0](./LICENSE-APACHE). Sole contributor: `annamau`.
+- The **legacy MiroFish surface** (Step1-5 components, OASIS profile generator, the social-media simulation runner, etc.) remains under [AGPL-3.0-or-later](./LICENSE), inherited from upstream.
+
+See [LICENSE-MAP.md](./LICENSE-MAP.md) for the file-by-file breakdown and [docs/aurora-license-audit.md](./docs/aurora-license-audit.md) for the audit. Each Aurora-subset file carries an `SPDX-License-Identifier: Apache-2.0` header.
+
+The hackathon submission exercises only the Aurora subset.
+
+**Gemma 4** is licensed under [Apache 2.0](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/). Aurora calls Gemma 4 as a service via Ollama — no Gemma 4 source code is incorporated into this codebase. The two licenses are compatible.
 
 The HAZUS-MH 2.1 fragility curves and the Worden 2012 GMICE conversions are open-source / peer-reviewed; their inclusion in `backend/app/aurora/hazus_fragility.py` is a re-implementation, not a redistribution.
 

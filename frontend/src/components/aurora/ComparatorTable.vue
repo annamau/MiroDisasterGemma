@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div ref="root" class="comparator-table" role="table" :aria-label="ariaLabel">
     <div class="cmp-header" role="row">

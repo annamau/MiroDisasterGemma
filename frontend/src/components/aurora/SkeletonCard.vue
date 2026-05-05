@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <template>
   <div class="skel-card" :class="`skel-${variant}`" :style="{ height: heightPx }">
     <div class="skel-shimmer"></div>

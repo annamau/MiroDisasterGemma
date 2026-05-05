@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Monte Carlo orchestrator — N trials per intervention, bootstrap 90% CI on
 deltas vs baseline. This is what powers the "wow factor" output:
