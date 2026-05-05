@@ -29,14 +29,17 @@ const props = defineProps({
 })
 
 const projectFn = inject('project', null)
+const projectVersion = inject('projectVersion', { value: 0 })
 
 const cx = computed(() => {
   if (!projectFn) return 0
+  projectVersion.value
   return projectFn(props.facility.lat, props.facility.lon)[0]
 })
 
 const cy = computed(() => {
   if (!projectFn) return 0
+  projectVersion.value
   return projectFn(props.facility.lat, props.facility.lon)[1]
 })
 

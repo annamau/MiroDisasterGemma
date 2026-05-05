@@ -6,7 +6,9 @@
     :cy="cy"
     :r="radius"
     :fill="hazusColor"
-    opacity="0.85"
+    stroke="rgba(255,255,255,0.85)"
+    stroke-width="0.5"
+    opacity="0.92"
   />
 </template>
 
@@ -26,14 +28,20 @@ const props = defineProps({
 })
 
 const projectFn = inject('project', null)
+// Bump-based reactivity: when leaflet pans/zooms, LeafletStage bumps
+// projectVersion. Read it inside the computed so cx/cy recompute.
+const projectVersion = inject('projectVersion', { value: 0 })
 
 const cx = computed(() => {
   if (!projectFn) return 0
+  // touch reactivity dep
+  projectVersion.value
   return projectFn(props.building.lat, props.building.lon)[0]
 })
 
 const cy = computed(() => {
   if (!projectFn) return 0
+  projectVersion.value
   return projectFn(props.building.lat, props.building.lon)[1]
 })
 

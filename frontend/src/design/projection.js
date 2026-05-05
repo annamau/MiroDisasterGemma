@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { geoEquirectangular } from 'd3'
+import { geoMercator } from 'd3'
 
 /**
- * Build a d3-geoEquirectangular projection that auto-fits a set of geographic
+ * Build a d3-geoMercator projection that auto-fits a set of geographic
  * points into a given viewBox. Returns a (lat, lon) -> [x, y] function.
+ *
+ * H-bundle: switched from geoEquirectangular to geoMercator so the SVG
+ * schematic aligns with the leaflet basemap tile system (Web Mercator).
+ * The visual difference is negligible at city scale but it lets the
+ * leaflet underlay and the SVG overlay stay pixel-perfect synced.
  *
  * The bbox is computed ONLY from the points passed in. If a hazard epicenter
  * sits offshore (Valencia DANA, anything Mediterranean), don't include it
@@ -48,7 +53,7 @@ export function makeProjection(
     ],
   }
 
-  const proj = geoEquirectangular().fitSize(
+  const proj = geoMercator().fitSize(
     [viewBoxWidth, viewBoxHeight],
     geojson,
   )

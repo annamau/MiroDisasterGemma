@@ -6,107 +6,69 @@
       <span>No buildings to render</span>
     </div>
 
-    <!-- Main SVG canvas -->
-    <svg
-      v-else
-      :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
-      :width="VIEW_W"
-      :height="VIEW_H"
-      class="schematic-map"
-      role="img"
-      preserveAspectRatio="xMidYMid meet"
-      :aria-label="`Schematic map of ${scenario.city ?? 'scenario'}`"
-    >
-      <defs>
-        <radialGradient :id="hazardGradId" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" :stop-color="hazardColor" stop-opacity="0.32" />
-          <stop offset="55%" :stop-color="hazardColor" stop-opacity="0.08" />
-          <stop offset="100%" :stop-color="hazardColor" stop-opacity="0" />
-        </radialGradient>
-      </defs>
+    <template v-else>
+      <!-- H5: LeafletStage owns the basemap + pan/zoom and exposes a
+           projector function via `inject('project')` + a version ref.
+           The SVG sits inside the slot and re-projects on every pan/zoom. -->
+      <LeafletStage
+        v-if="cityPoints.length > 0"
+        :points="cityPoints"
+        :theme="basemapTheme"
+      >
+        <template #default="{ viewport }">
+          <svg
+            class="schematic-map"
+            :width="viewport.w || 0"
+            :height="viewport.h || 0"
+            :viewBox="`0 0 ${viewport.w || 1} ${viewport.h || 1}`"
+            role="img"
+            preserveAspectRatio="none"
+            :aria-label="`Schematic map of ${scenario.city ?? 'scenario'}`"
+          >
+            <defs>
+              <radialGradient :id="hazardGradId" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" :stop-color="hazardColor" stop-opacity="0.32" />
+                <stop offset="55%" :stop-color="hazardColor" stop-opacity="0.08" />
+                <stop offset="100%" :stop-color="hazardColor" stop-opacity="0" />
+              </radialGradient>
+            </defs>
 
-      <!-- Hazard halo: visualizes the seismic / DANA / etc. epicenter so the
-           scene has a center of attention even before animation kicks in.
-           If the real epicenter is offshore, the halo sits clamped to the
-           viewport edge with a chevron arrow pointing toward the real
-           position so the geography still reads. -->
-      <g v-if="hazardProjected" data-aurora-hazard-halo>
-        <circle
-          :cx="hazardProjected.x"
-          :cy="hazardProjected.y"
-          :r="hazardRadius"
-          :fill="`url(#${hazardGradId})`"
-        />
-        <circle
-          class="hazard-pulse"
-          :cx="hazardProjected.x"
-          :cy="hazardProjected.y"
-          :r="hazardRadius * 0.35"
-          :stroke="hazardColor"
-          stroke-width="1.5"
-          fill="none"
-          opacity="0.75"
-        />
-        <circle
-          class="hazard-pulse hazard-pulse-2"
-          :cx="hazardProjected.x"
-          :cy="hazardProjected.y"
-          :r="hazardRadius * 0.55"
-          :stroke="hazardColor"
-          stroke-width="1"
-          fill="none"
-          opacity="0.45"
-        />
+            <!-- District pucks first (so buildings sit on top) -->
+            <DistrictTile
+              v-for="district in scenario.districts"
+              :key="district.district_id"
+              :district="district"
+              :radius="districtRadius"
+            />
 
-        <!-- Off-screen arrow when the real epicenter sits outside the city bbox -->
-        <g v-if="offscreenArrow"
-           :transform="`translate(${offscreenArrow.x}, ${offscreenArrow.y}) rotate(${offscreenArrow.deg})`"
-        >
-          <polygon
-            points="14,0 -6,-7 -2,0 -6,7"
-            :fill="hazardColor"
-            opacity="0.85"
-          />
-        </g>
-      </g>
+            <!-- Building dots -->
+            <Building
+              v-for="building in scenario.buildings"
+              :key="building.building_id"
+              :building="building"
+              :radius="buildingRadius"
+            />
 
-      <!-- District pucks (render first so buildings sit on top) -->
-      <DistrictTile
-        v-for="district in scenario.districts"
-        :key="district.district_id"
-        :district="district"
-        :radius="districtRadius"
-      />
-
-      <!-- Building dots -->
-      <Building
-        v-for="building in scenario.buildings"
-        :key="building.building_id"
-        :building="building"
-        :radius="buildingRadius"
-      />
-
-      <!-- Responder icons: hospitals -->
-      <ResponderIcon
-        v-for="hospital in scenario.hospitals"
-        :key="hospital.hospital_id"
-        :facility="{ ...hospital, type: 'hospital' }"
-      />
-
-      <!-- Responder icons: fire stations -->
-      <ResponderIcon
-        v-for="station in scenario.fire_stations"
-        :key="station.station_id"
-        :facility="{ ...station, type: 'fire_station' }"
-      />
-
-      <!-- Responder icons: shelters -->
-      <ResponderIcon
-        v-for="shelter in scenario.shelters"
-        :key="shelter.shelter_id"
-        :facility="{ ...shelter, type: 'shelter' }"
-      />
-    </svg>
+            <!-- Responder icons -->
+            <ResponderIcon
+              v-for="hospital in scenario.hospitals"
+              :key="hospital.hospital_id"
+              :facility="{ ...hospital, type: 'hospital' }"
+            />
+            <ResponderIcon
+              v-for="station in scenario.fire_stations"
+              :key="station.station_id"
+              :facility="{ ...station, type: 'fire_station' }"
+            />
+            <ResponderIcon
+              v-for="shelter in scenario.shelters"
+              :key="shelter.shelter_id"
+              :facility="{ ...shelter, type: 'shelter' }"
+            />
+          </svg>
+        </template>
+      </LeafletStage>
+    </template>
 
     <!-- Legend overlay -->
     <div v-if="(scenario.buildings ?? []).length > 0" class="legend">
@@ -128,21 +90,22 @@
 </template>
 
 <script setup>
-import { computed, provide } from 'vue'
-import { clampToBox, makeProjection, medianNearestRadius } from '@/design/projection.js'
+import { computed } from 'vue'
 import DistrictTile from './map/DistrictTile.vue'
 import Building from './map/Building.vue'
 import ResponderIcon from './map/ResponderIcon.vue'
+import LeafletStage from './LeafletStage.vue'
 
 const props = defineProps({
   scenario: {
     type: Object,
     required: true,
   },
+  /** 'light' | 'dark' — passed straight to MapBasemap. Defaults light per H-bundle. */
+  basemapTheme: { type: String, default: 'light' },
 })
 
-const VIEW_W = 1200
-const VIEW_H = 720
+const basemapTheme = computed(() => props.basemapTheme)
 
 /**
  * Fit the projection to CITY assets only (districts + buildings + facilities).
@@ -172,24 +135,12 @@ const cityPoints = computed(() => {
   return points
 })
 
-const projectFn = computed(() => makeProjection(cityPoints.value, VIEW_W, VIEW_H))
+// District puck radius — fixed for now in pixel space; LeafletStage
+// reprojects on every pan/zoom so the puck stays anchored to its
+// centroid regardless of scale. Clamped to [16, 36].
+const districtRadius = computed(() => 28)
 
-provide('project', (...args) => projectFn.value(...args))
-
-// District puck radius is derived from the nearest-neighbor distance among
-// projected district centroids — guarantees no two pucks overlap. Clamped
-// to [20, 56] so we don't get cartoon-big single-district scenarios or
-// invisibly-small dense ones.
-const districtRadius = computed(() => {
-  const projected = (props.scenario.districts ?? []).map(d =>
-    projectFn.value(d.centroid_lat, d.centroid_lon),
-  )
-  return medianNearestRadius(projected, 20, 56)
-})
-
-// Building dot radius scales inversely with density. Sparse maps get
-// 3.5px chunky dots, dense ones (256-building LA) get 1.8px. Keeps
-// the schematic legible without aggressive overlap.
+// Building dot radius scales inversely with density.
 const buildingRadius = computed(() => {
   const n = (props.scenario.buildings ?? []).length
   if (n <= 60)  return 3.4
@@ -208,33 +159,6 @@ const HAZARD_ELEMENT = {
 
 const hazardElement = computed(() => HAZARD_ELEMENT[props.scenario.hazard?.kind] ?? 'aether')
 const hazardColor = computed(() => `var(--el-${hazardElement.value})`)
-
-/**
- * Project the hazard epicenter, then clamp to the viewport. If the real
- * epicenter is offshore or otherwise outside the city bbox, we render the
- * halo at the clamped position and an arrow pointing at the off-screen
- * direction so users still understand "the hazard is over there."
- */
-const hazardProjected = computed(() => {
-  const h = props.scenario.hazard
-  if (!h || h.epicenter_lat == null || h.epicenter_lon == null) return null
-  const raw = projectFn.value(h.epicenter_lat, h.epicenter_lon)
-  return clampToBox(raw, VIEW_W, VIEW_H, 40)
-})
-
-// Hazard halo radius: small relative to viewBox so it reads as
-// "the source" not "the entire scene". Decoupled from magnitude beyond
-// the viewport-relative cap; the live sim's choropleth carries severity.
-const hazardRadius = computed(() => {
-  const h = props.scenario.hazard
-  if (!h) return 90
-  // Magnitude scales the halo modestly: M6 → 70, M7.2 → 95, M7.8 → 110.
-  if (h.magnitude) {
-    return Math.min(140, Math.max(70, 35 + h.magnitude * 9))
-  }
-  return 95
-})
-
 const hazardGradId = computed(() => `hazardGrad-${props.scenario.scenario_id ?? 'sc'}`)
 
 const hazardLabel = computed(() => {
@@ -244,38 +168,25 @@ const hazardLabel = computed(() => {
   const mag = h.magnitude ? ` M${h.magnitude}` : ''
   return `${kind}${mag}`.trim()
 })
-
-/**
- * Off-screen direction arrow geometry (only when the hazard is clamped).
- * Drawn as a 16px chevron inset 6px from the clamped position, rotated
- * by `theta` so it points toward the real epicenter.
- */
-const offscreenArrow = computed(() => {
-  const h = hazardProjected.value
-  if (!h || !h.clamped) return null
-  // Convert theta (atan2 result, 0=east) to CSS rotation degrees.
-  const deg = (h.theta * 180) / Math.PI
-  return { x: h.x, y: h.y, deg }
-})
 </script>
 
 <style scoped>
 .schematic-map-wrapper {
   position: relative;
-  background: var(--bg-1);
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
   display: block;
   width: 100%;
-  aspect-ratio: 5 / 3;
-  max-width: 1200px;
+  height: 100%;
 }
 
 .schematic-map {
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 100%;
+  pointer-events: none;
 }
 
 .empty-state {
@@ -307,7 +218,7 @@ const offscreenArrow = computed(() => {
   position: absolute;
   left: var(--sp-4);
   bottom: var(--sp-4);
-  background: color-mix(in srgb, var(--bg-0) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: var(--sp-2) var(--sp-3);
@@ -315,9 +226,11 @@ const offscreenArrow = computed(() => {
   flex-direction: column;
   gap: 3px;
   font-size: 11px;
-  color: var(--ink-1);
+  color: var(--ink-0);
   backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px -6px rgba(26, 34, 56, 0.18);
   pointer-events: none;
+  z-index: 2;
 }
 .legend-row {
   display: flex;
@@ -354,21 +267,23 @@ const offscreenArrow = computed(() => {
 
 .hazard-tag {
   position: absolute;
-  top: var(--sp-4);
-  right: var(--sp-4);
+  top: var(--sp-3);
+  left: var(--sp-3);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-0) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border: 1px solid var(--line);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--ink-1);
+  color: var(--ink-0);
   backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px -6px rgba(26, 34, 56, 0.18);
+  z-index: 2;
 }
 .tag-dot {
   width: 8px;

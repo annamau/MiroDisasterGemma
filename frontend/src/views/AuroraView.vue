@@ -33,6 +33,17 @@
           <span class="ai-num">Act {{ currentAct }}</span>
           <span class="ai-of">of 5</span>
         </div>
+        <button
+          class="topbar-theme"
+          :aria-label="theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'"
+          @click="toggleTheme"
+        >
+          <component
+            :is="theme === 'light' ? PhMoon : PhSun"
+            :size="14"
+            weight="duotone"
+          />
+        </button>
       </template>
 
       <!-- Lateral toolbar: groups events into pills, drawer reveals detail -->
@@ -120,6 +131,8 @@ import {
   PhArrowLeft,
   PhCpu,
   PhFirstAidKit,
+  PhMoon,
+  PhSun,
   PhUsersThree,
   PhWaveSawtooth,
 } from '@phosphor-icons/vue'
@@ -156,6 +169,29 @@ const currentAct = ref(0)
 // Lateral rail / drawer state
 const shellRef = ref(null)
 const activeDrawerId = ref(null)
+
+// H4: theme — light by default per civic-tech convention; dark optional
+// for night-ops / low-light demos. Persists in localStorage and reflects
+// onto :root[data-theme] which the tokens.css cascade reads.
+const theme = ref(loadInitialTheme())
+
+function loadInitialTheme() {
+  if (typeof window === 'undefined') return 'light'
+  const stored = window.localStorage?.getItem('aurora-theme')
+  if (stored === 'light' || stored === 'dark') return stored
+  return 'light'
+}
+
+function applyTheme(t) {
+  if (typeof document === 'undefined') return
+  document.documentElement.setAttribute('data-theme', t)
+}
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  applyTheme(theme.value)
+  try { window.localStorage?.setItem('aurora-theme', theme.value) } catch {}
+}
 const heroRow = ref(null)
 const deltaGrid = ref(null)
 const { ctx, gsap } = useGsap(root)
@@ -607,6 +643,7 @@ function applyActFromUrl() {
 }
 
 onMounted(async () => {
+  applyTheme(theme.value)
   applyActFromUrl()
   // Apply scroll lock for the (possibly URL-restored) initial act.
   if (typeof document !== 'undefined' && currentAct.value >= 2) {
@@ -726,38 +763,42 @@ onMounted(async () => {
   letter-spacing: 0.08em;
   color: var(--ink-2);
   text-transform: uppercase;
+  margin-right: var(--sp-3);
 }
 .topbar-actindex .ai-num { color: var(--ink-0); font-weight: 600; }
+
+.topbar-theme {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.topbar-theme:hover {
+  background: var(--bg-2);
+  border-color: var(--ink-2);
+  color: var(--ink-0);
+}
+.topbar-theme:focus-visible { outline: 2px solid var(--el-aether); outline-offset: 2px; }
 
 /* ---- Stage ---- */
 .stage-map {
   position: absolute;
   inset: var(--sp-4);
   display: block;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--bg-0) 80%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 60%, transparent) 100%);
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--ink-0) 4%, transparent),
-    0 24px 48px -16px rgba(0, 0, 0, 0.45);
-}
-/* Subtle paper-grid layer behind the SVG so the city reads as a view,
-   not as chrome that swallowed it. */
-.stage-map::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 56px 56px;
-  opacity: 0.35;
-  mask-image: radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, transparent 80%);
-  pointer-events: none;
+    0 1px 2px rgba(26, 34, 56, 0.05),
+    0 12px 32px -16px rgba(26, 34, 56, 0.18);
 }
 .stage-map :deep(.schematic-map-wrapper) {
   position: absolute;
@@ -769,7 +810,6 @@ onMounted(async () => {
   border-radius: 0;
   background: transparent;
   aspect-ratio: auto;
-  z-index: 1;
 }
 .stage-loading {
   position: absolute;

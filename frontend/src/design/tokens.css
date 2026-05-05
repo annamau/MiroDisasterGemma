@@ -2,44 +2,53 @@
   /*
    * Aurora "schoolbook" palette
    *   Source: #ff595e #ffca3a #8ac926 #1982c4 #6a4c93
-   *   Reads as: civic / institutional / informational, not neon-game.
    *
-   * Mapping to Aurora's element semantics (kept stable so existing
-   * scenario-element bindings still work):
+   * Light-theme migration (H-bundle, 2026-05-05): the dark surfaces
+   * we shipped through G-bundle read as "consumer SaaS / gaming," not
+   * "civic infrastructure." All real EM tools (USGS ShakeMap, FEMA
+   * HAZUS, ESRI ArcGIS, INFORM Risk Index, NOAA Storm Surge, CalFire,
+   * Watch Duty) ship light. Aurora now matches that convention.
+   *
+   * Element semantics unchanged (the palette is the meaning):
    *   fire   = red    → severity / hazards / danger
    *   earth  = yellow → ground shaking / caution
    *   air    = green  → fresh / safe / wind / "all-clear"
    *   water  = blue   → flood / hospitals / cool tones
    *   aether = purple → people / agents / Gemma reasoning
+   *
+   * Element accents had to be DARKENED on light bg to clear graphics-AA
+   * (3:1 vs --bg-1). The schoolbook bright variant lives as `*-bright`
+   * for use on filled chips / dark cards; default `--el-*` is the
+   * AA-clearing shade for legends, dots, hairlines.
    */
-  --el-fire:    #ff595e;
-  --el-fire-glow: #ff8488;
-  --el-earth:   #ffca3a;
-  --el-earth-glow: #ffd96b;
-  --el-air:     #8ac926;
-  --el-air-glow: #a8de4f;
-  --el-water:   #1982c4;
-  --el-water-glow: #4ea3d8;
-  /* Aether is the user palette's deepest shade (#6a4c93). On dark bg-1
-     it falls below the 3:1 graphics threshold, so the visible accent is
-     a tint that carries the same hue, and #6a4c93 is reserved for solid
-     fills against light surfaces (tooltip cards, legend chips). */
-  --el-aether:  #8e6db8;
-  --el-aether-deep: #6a4c93;
-  --el-aether-glow: #b794f4;
+  --el-fire:    #d6322f;          /* red, AA on light */
+  --el-fire-bright: #ff595e;
+  --el-fire-glow: rgba(255, 89, 94, 0.22);
+  --el-earth:   #b07a00;          /* darker yellow → AA */
+  --el-earth-bright: #ffca3a;
+  --el-earth-glow: rgba(255, 202, 58, 0.28);
+  --el-air:     #4f8a14;          /* darker green → AA */
+  --el-air-bright: #8ac926;
+  --el-air-glow: rgba(138, 201, 38, 0.26);
+  --el-water:   #1366a0;          /* slightly darker blue → AA */
+  --el-water-bright: #1982c4;
+  --el-water-glow: rgba(25, 130, 196, 0.22);
+  --el-aether:  #6a4c93;          /* user-given deep purple — AA on light */
+  --el-aether-bright: #8e6db8;
+  --el-aether-glow: rgba(106, 76, 147, 0.22);
 
   /*
-   * Surface neutrals — slate, not pure black. The schoolbook brights
-   * sit on these without burning; the map breathes against them.
+   * Surfaces — paper-light. Off-white page, tinted-warm panels, neutral
+   * raised cards. Borrowed from FEMA / ArcGIS Dashboards conventions.
    */
-  --bg-0: #1a2030;  /* page (deep slate) */
-  --bg-1: #232b3d;  /* panels (rail, topbar) */
-  --bg-2: #2d3649;  /* raised (cards, pills, inputs) */
-  --ink-0: #f4f6f8;
-  --ink-1: #b8c0cf;
-  --ink-2: #7c8598;
-  --line: #3a4358;
-  --line-glow: rgba(106, 76, 147, 0.24);
+  --bg-0: #f4f1ea;  /* page — warm paper */
+  --bg-1: #fbfaf6;  /* panels (rail, topbar) — slightly lighter than page */
+  --bg-2: #ffffff;  /* raised (cards, drawer panels, inputs) */
+  --ink-0: #1a2238;  /* navy-ink, AAA on bg-0 */
+  --ink-1: #4a5468;  /* secondary text */
+  --ink-2: #7a8294;  /* meta / labels */
+  --line: #d9d6cc;   /* warm hairline matched to paper */
+  --line-glow: rgba(106, 76, 147, 0.18);
 
   /* Spacing (4px grid) */
   --sp-1: 4px;
@@ -109,4 +118,33 @@
   --pyr-3: #a23919;
   --pyr-4: #e85f1f;
   --pyr-5: #ffb061;  /* near / hot */
+}
+
+/*
+ * Dark-theme override (operations / low-light / night). Activated by
+ *   <html data-theme="dark"> or :root[data-theme="dark"].
+ * Element accents flip to the schoolbook brights (which clear graphics-AA
+ * on dark surfaces); surfaces flip back to the slate set we shipped in
+ * G-bundle. Severity ramps stay calibrated — they're tied to the hazard,
+ * not to the chrome theme.
+ */
+:root[data-theme='dark'] {
+  --el-fire:    #ff595e;
+  --el-fire-bright: #ff8488;
+  --el-earth:   #ffca3a;
+  --el-earth-bright: #ffd96b;
+  --el-air:     #8ac926;
+  --el-air-bright: #a8de4f;
+  --el-water:   #4ea3d8;
+  --el-water-bright: #80c2ec;
+  --el-aether:  #8e6db8;
+  --el-aether-bright: #b794f4;
+
+  --bg-0: #1a2030;
+  --bg-1: #232b3d;
+  --bg-2: #2d3649;
+  --ink-0: #f4f6f8;
+  --ink-1: #b8c0cf;
+  --ink-2: #7c8598;
+  --line: #3a4358;
 }

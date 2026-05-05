@@ -107,7 +107,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 35%, var(--bg-1) 0%, var(--bg-0) 70%);
+  background:
+    radial-gradient(circle at 50% 35%, var(--bg-1) 0%, var(--bg-0) 80%);
   overflow: hidden;
 }
 
