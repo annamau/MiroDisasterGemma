@@ -40,4 +40,53 @@
   --fz-32: 32px;
   --fz-48: 48px;
   --fz-64: 64px;
+  --fz-96: 96px;
+
+  /* Type stacks */
+  --ff-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --ff-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+
+  /* Bloomberg ticker accent — only on the ticker, never elsewhere */
+  --amber: #F7A200;
+
+  /*
+   * Hazard-appropriate severity palettes (calibrated, not decorative).
+   *
+   * Used by hazard choropleths in Act 4 / Act 5. Each palette is keyed
+   * by a meaningful intensity scale, not by branding. Pickers in
+   * `frontend/src/design/severity.js` map hazard.kind + intensity → swatch.
+   */
+
+  /* USGS Modified Mercalli Intensity (earthquake — LA, Türkiye, Atlantis) */
+  --mmi-1:  #ffffff;  /* I    Not felt */
+  --mmi-2:  #bfccff;  /* II   Weak */
+  --mmi-3:  #80ffff;  /* III  Light */
+  --mmi-4:  #7af0c8;  /* IV   Light-moderate */
+  --mmi-5:  #ffff00;  /* V    Moderate */
+  --mmi-6:  #ffc800;  /* VI   Strong */
+  --mmi-7:  #ff9100;  /* VII  Very strong */
+  --mmi-8:  #ff0000;  /* VIII Severe */
+  --mmi-9:  #c80000;  /* IX   Violent */
+  --mmi-10: #640000;  /* X+   Extreme */
+
+  /* NOAA-SLOSH-style flood depth ramp (Valencia DANA) */
+  --flood-1: #dbeeff;  /* 1ft */
+  --flood-2: #8cc4eb;  /* 3ft */
+  --flood-3: #3387c8;  /* 6ft */
+  --flood-4: #0d3d6e;  /* 12ft */
+  --flood-5: #06203d;  /* 21ft+ */
+
+  /* Fujita-derived tornado wind ramp (Joplin EF5) */
+  --tor-1: #fff5cc;  /* EF1 */
+  --tor-2: #f7c84a;  /* EF2 */
+  --tor-3: #ee7a2c;  /* EF3 */
+  --tor-4: #c43a16;  /* EF4 */
+  --tor-5: #7d1a05;  /* EF5 */
+
+  /* Pyroclastic-distance volcanic ramp (Pompeii) */
+  --pyr-1: #1a1a1a;  /* far / cool */
+  --pyr-2: #5a1f0c;
+  --pyr-3: #a23919;
+  --pyr-4: #e85f1f;
+  --pyr-5: #ffb061;  /* near / hot */
 }
