@@ -62,3 +62,6 @@ backend/venv311/
 
 # Aurora — runtime decision cache (regenerated per machine)
 data/decision_cache.jsonl
+
+# Aurora — partial / variant cache files
+data/decision_cache.jsonl.*
