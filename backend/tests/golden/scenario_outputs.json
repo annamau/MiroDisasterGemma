@@ -1,0 +1,214 @@
+{
+  "atlantis": {
+    "deaths_by_district_sorted": [
+      [
+        "ATL-D01",
+        14135
+      ],
+      [
+        "ATL-D02",
+        872
+      ],
+      [
+        "ATL-D03",
+        2554
+      ],
+      [
+        "ATL-D04",
+        403
+      ],
+      [
+        "ATL-D05",
+        612
+      ],
+      [
+        "ATL-D06",
+        269
+      ],
+      [
+        "ATL-D07",
+        472
+      ]
+    ],
+    "deaths_point": 6439.0,
+    "economic_loss_point": 41180142611.67,
+    "injuries_point": 22364.67,
+    "scenario_id": "atlantis"
+  },
+  "joplin-ef5-2011": {
+    "deaths_by_district_sorted": [
+      [
+        "JOP-D01",
+        2194
+      ],
+      [
+        "JOP-D02",
+        1305
+      ],
+      [
+        "JOP-D03",
+        654
+      ],
+      [
+        "JOP-D04",
+        324
+      ],
+      [
+        "JOP-D05",
+        216
+      ],
+      [
+        "JOP-D06",
+        0
+      ]
+    ],
+    "deaths_point": 1564.33,
+    "economic_loss_point": 13805056873.67,
+    "injuries_point": 7131.0,
+    "scenario_id": "joplin-ef5-2011"
+  },
+  "la-puente-hills-m72-ref": {
+    "deaths_by_district_sorted": [
+      [
+        "LA-D01",
+        4040
+      ],
+      [
+        "LA-D02",
+        6216
+      ],
+      [
+        "LA-D03",
+        21920
+      ],
+      [
+        "LA-D04",
+        1970
+      ],
+      [
+        "LA-D05",
+        1782
+      ],
+      [
+        "LA-D06",
+        2088
+      ],
+      [
+        "LA-D07",
+        6210
+      ],
+      [
+        "LA-D08",
+        1520
+      ]
+    ],
+    "deaths_point": 15248.67,
+    "economic_loss_point": 94669706863.67,
+    "injuries_point": 57741.67,
+    "scenario_id": "la-puente-hills-m72-ref"
+  },
+  "pompeii-79": {
+    "deaths_by_district_sorted": [
+      [
+        "POMP-D01",
+        832
+      ],
+      [
+        "POMP-D02",
+        360
+      ],
+      [
+        "POMP-D03",
+        0
+      ],
+      [
+        "POMP-D04",
+        0
+      ],
+      [
+        "POMP-D05",
+        0
+      ],
+      [
+        "POMP-D06",
+        0
+      ]
+    ],
+    "deaths_point": 397.33,
+    "economic_loss_point": 4777079478.0,
+    "injuries_point": 2085.33,
+    "scenario_id": "pompeii-79"
+  },
+  "turkey-syria-m78-2023": {
+    "deaths_by_district_sorted": [
+      [
+        "TR-D01",
+        19150
+      ],
+      [
+        "TR-D02",
+        8754
+      ],
+      [
+        "TR-D03",
+        46940
+      ],
+      [
+        "TR-D04",
+        3717
+      ],
+      [
+        "TR-D05",
+        1008
+      ],
+      [
+        "TR-D06",
+        21312
+      ],
+      [
+        "TR-D07",
+        3177
+      ]
+    ],
+    "deaths_point": 34686.0,
+    "economic_loss_point": 213028993589.67,
+    "injuries_point": 160202.33,
+    "scenario_id": "turkey-syria-m78-2023"
+  },
+  "valencia-dana-2024": {
+    "deaths_by_district_sorted": [
+      [
+        "VLC-D01",
+        4565
+      ],
+      [
+        "VLC-D02",
+        1818
+      ],
+      [
+        "VLC-D03",
+        489
+      ],
+      [
+        "VLC-D04",
+        600
+      ],
+      [
+        "VLC-D05",
+        906
+      ],
+      [
+        "VLC-D06",
+        883
+      ],
+      [
+        "VLC-D07",
+        2032
+      ]
+    ],
+    "deaths_point": 3764.33,
+    "economic_loss_point": 28138511216.67,
+    "injuries_point": 15517.33,
+    "scenario_id": "valencia-dana-2024"
+  }
+}
