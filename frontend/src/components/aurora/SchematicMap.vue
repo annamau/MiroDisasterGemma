@@ -138,14 +138,17 @@ const cityPoints = computed(() => {
 // centroid regardless of scale. Clamped to [16, 36].
 const districtRadius = computed(() => 28)
 
-// Building dot radius scales inversely with density.
+// Building dot radius scales inversely with density. Floor bumped from
+// 1.8 → 3.0 so dots stay legible on top of CartoDB Positron tiles at
+// city zoom (without the basemap they were fine; with streets visible
+// the 1.8px specks disappear into the texture).
 const buildingRadius = computed(() => {
   const n = (props.scenario.buildings ?? []).length
-  if (n <= 60)  return 3.4
-  if (n <= 120) return 2.8
-  if (n <= 180) return 2.4
-  if (n <= 240) return 2.0
-  return 1.8
+  if (n <= 60)  return 5.0
+  if (n <= 120) return 4.4
+  if (n <= 180) return 4.0
+  if (n <= 240) return 3.4
+  return 3.0
 })
 
 const HAZARD_ELEMENT = {

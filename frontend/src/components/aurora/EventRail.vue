@@ -45,6 +45,7 @@
 import {
   PhBuildings,
   PhCaretRight,
+  PhChartLineUp,
   PhCpu,
   PhFirstAidKit,
   PhFlame,
@@ -75,6 +76,7 @@ defineEmits(['open', 'start'])
 // Icon registry. New icons added here only.
 const ICONS = {
   Buildings: PhBuildings,
+  ChartLineUp: PhChartLineUp,
   Cpu: PhCpu,
   FirstAidKit: PhFirstAidKit,
   Flame: PhFlame,

@@ -192,7 +192,12 @@ onBeforeUnmount(() => {
 .overlay-host {
   position: absolute;
   inset: 0;
-  z-index: 400;       /* above leaflet tiles, below leaflet controls */
+  /* Leaflet's .leaflet-map-pane uses z-index 400 too AND sits later
+     in DOM, so same-z conflict makes the tile-pane paint over us.
+     Bumping to 650 puts overlay above the entire leaflet pane stack
+     (tilePane 200 / overlayPane 400 / shadowPane 500 / markerPane 600)
+     but below the popupPane 700 we don't use. */
+  z-index: 650;
   pointer-events: none;
 }
 .overlay-host > * { pointer-events: none; }

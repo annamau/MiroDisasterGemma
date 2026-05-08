@@ -60,7 +60,7 @@
       <!-- Stage: full-bleed map (Act 2/3) — Act 4/5 will dock more here later -->
       <template #stage>
         <div v-if="loadedScenario" class="stage-map">
-          <SchematicMap :scenario="loadedScenario" />
+          <SchematicMap :scenario="loadedScenario" :basemap-theme="theme" />
         </div>
         <div v-else class="stage-loading">
           <div class="loading-pulse"></div>
@@ -120,6 +120,47 @@
             <div><dt>Shelters</dt><dd>{{ loadedScenario?.shelters?.length ?? 0 }}</dd></div>
           </dl>
         </div>
+
+        <!-- Post-MC result panel — opens automatically after START completes. -->
+        <div v-if="drawerId === 'result' && mcRun" class="drawer-content drawer-result">
+          <h3 class="drawer-title">
+            <PhChartLineUp :size="16" weight="duotone" color="var(--el-aether)" />
+            <span>Result</span>
+          </h3>
+          <p class="drawer-blurb">
+            <strong>{{ mcRun.n_trials }} trials</strong> · {{ mcRun.duration_hours }}h ·
+            wall {{ mcRun.wall_seconds?.toFixed?.(1) ?? mcRun.wall_seconds }}s
+          </p>
+          <div class="result-hero">
+            <div class="hero-stat">
+              <div class="hero-num">{{ Math.round(totalLivesSaved).toLocaleString() }}</div>
+              <div class="hero-label">Lives saved</div>
+              <div v-if="bestLivesCi" class="hero-ci">90% CI {{ Math.round(bestLivesCi.lo).toLocaleString() }} – {{ Math.round(bestLivesCi.hi).toLocaleString() }}</div>
+            </div>
+            <div class="hero-stat">
+              <div class="hero-num">${{ formatCurrency(totalDollarsSaved) }}</div>
+              <div class="hero-label">Dollars saved</div>
+            </div>
+          </div>
+          <div v-if="bestDelta" class="best-intervention">
+            <div class="bi-label">Best intervention</div>
+            <div class="bi-name">{{ bestDelta.label || bestDelta.intervention_id }}</div>
+            <div v-if="bestDelta.dollars_per_life" class="bi-cost">
+              ${{ formatCurrency(bestDelta.dollars_per_life) }} per life saved
+            </div>
+          </div>
+          <div v-if="enrichedDeltas.length > 1" class="all-deltas">
+            <div class="all-deltas-title">All interventions</div>
+            <div v-for="d in enrichedDeltas" :key="d.intervention_id" class="delta-row">
+              <span class="dr-name">{{ d.label || d.intervention_id }}</span>
+              <span class="dr-lives">{{ Math.round(d.lives_saved_mean).toLocaleString() }} lives</span>
+            </div>
+          </div>
+          <p class="drawer-cite">
+            <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+            <span>&nbsp;Monte Carlo · paired bootstrap 90% CI · HAZUS-MH 2.1 fragility</span>
+          </p>
+        </div>
       </template>
     </CommandShell>
   </div>
@@ -129,6 +170,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   PhArrowLeft,
+  PhChartLineUp,
   PhCpu,
   PhFirstAidKit,
   PhMoon,
@@ -203,13 +245,18 @@ const reduceMotion = () =>
 // --- State ---
 const scenarios = ref([])
 const selectedScenarioId = ref('la-puente-hills-m72-ref')
-// Interventions are no longer pre-loaded. The baseline run completes
-// first; afterwards Gemma 4 reads the report and proposes targeted
-// interventions to compare in the Prevention Lab. The catalog
-// (`interventions`) and `selectedInterventionIds` keep their shape so
-// the Prevention Lab in M6' can populate them on demand.
+// Interventions: long-term plan is post-sim Gemma proposal (M6'
+// Prevention Lab). For the current demo we seed three high-leverage
+// LA-D03 interventions so the first START fires with non-zero deltas
+// and the Result drawer shows real lives_saved/dollars_saved numbers.
+// When the case is non-LA, the backend MC simply ignores intervention
+// IDs that don't apply (no error) so this is safe across scenarios.
 const interventions = ref([])
-const selectedInterventionIds = ref([])
+const selectedInterventionIds = ref([
+  'preposition_d03_4amb',
+  'evac_d03_30min_early',
+  'retrofit_d03_w1',
+])
 const nTrials = ref(8)
 const nPopulation = ref(80)
 const durationHours = ref(24)
@@ -320,16 +367,23 @@ const hazardLabel = computed(() => {
 // Lateral rail groups — each pill is one click-to-reveal section. Stats
 // pull from the loadedScenario when present so judges see real numbers
 // the moment they pick a city.
+// Compact $-formatter for hero numbers + cost-per-life. 1.4M / 690K shape.
+function formatCurrency(n) {
+  if (n == null || !isFinite(n)) return '—'
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return (n / 1e9).toFixed(1) + 'B'
+  if (abs >= 1e6) return (n / 1e6).toFixed(1) + 'M'
+  if (abs >= 1e3) return (n / 1e3).toFixed(0) + 'K'
+  return Math.round(n).toLocaleString()
+}
+
 const railGroups = computed(() => {
   const s = loadedScenario.value
   const respondersTotal =
     (s?.hospitals?.length ?? 0) +
     (s?.fire_stations?.length ?? 0) +
     (s?.shelters?.length ?? 0)
-  // Pre-sim rail (Acts 2/3) shows ONLY the city's three real assets:
-  // hazard, population, responders. No interventions are pre-loaded —
-  // Gemma proposes them after the baseline run completes (Act 5).
-  return [
+  const baseGroups = [
     {
       id: 'hazard',
       label: 'Hazard',
@@ -352,6 +406,20 @@ const railGroups = computed(() => {
       icon: 'FirstAidKit',
     },
   ]
+  // After the MC completes, surface a 4th pill so the user can re-open
+  // the result drawer (auto-opens on completion, but they may close it).
+  if (mcRun.value) {
+    baseGroups.push({
+      id: 'result',
+      label: runState.value === 'running' ? 'Running…' : 'Result',
+      stat: runState.value === 'running'
+        ? 'simulation in progress'
+        : `${Math.round(totalLivesSaved.value).toLocaleString()} lives saved`,
+      element: 'aether',
+      icon: 'ChartLineUp',
+    })
+  }
+  return baseGroups
 })
 
 // --- Computed: streaming arms list ---
@@ -496,14 +564,22 @@ async function onRunMC() {
   recentDecisions.value = []
   runState.value = 'running'
   try {
-    const resp = await auroraApi.runMCStreaming(selectedScenarioId.value, {
+    // Direct (sync) MC — streaming MCProgressPanel was deprecated in the
+    // H-bundle CommandShell refactor and is not currently mounted, so the
+    // streaming `done` event never fires. Sync POST returns the full run
+    // body; we drop it into mcRun and open the Result drawer.
+    const resp = await auroraApi.runMonteCarlo(selectedScenarioId.value, {
       intervention_ids: selectedInterventionIds.value,
       n_trials: nTrials.value,
       duration_hours: durationHours.value,
       n_population_agents: nPopulation.value,
       use_llm: useLLM.value,
     })
-    streamRunId.value = resp.data.run_id
+    mcRun.value = resp.data
+    runState.value = 'done'
+    // Auto-open the Result drawer so the user sees outcome immediately.
+    activeDrawerId.value = 'result'
+    shellRef.value?.openDrawer?.('result')
   } catch (e) {
     errorMsg.value = `MC run failed: ${e.message}`
     runState.value = 'idle'
@@ -602,10 +678,17 @@ function goToAct(n) {
 }
 
 async function onCitySelect(scenarioId) {
+  // If the user clicks the city that's already selected (Vue defaults
+  // selectedScenarioId to 'la-puente-hills-m72-ref'), the watcher
+  // skips because newId === oldId. Always advance the act AND fire
+  // onLoadScenario explicitly so the map renders either way.
+  const isSameCity = selectedScenarioId.value === scenarioId
   selectedScenarioId.value = scenarioId
-  // The selectedScenarioId watcher kicks off onLoadScenario(); we just advance
-  // the act so the map renders as soon as the preview lands.
   goToAct(2)
+  if (isSameCity) {
+    await onLoadScenario()
+  }
+  // else: the watch(selectedScenarioId, …) handler will run onLoadScenario
 }
 
 // Sub-headline for Acts 2..5 — adapts to the selected hazard so judges see
@@ -651,6 +734,12 @@ onMounted(async () => {
   }
   await loadIndex()
   await applyDemoSeed()
+  // If the URL deep-linked to act 2..5 but the user never went through
+  // Act 1 (where the watcher fires onLoadScenario), the map will be
+  // stuck on "BUILDING SCENARIO…". Force-load the default scenario.
+  if (currentAct.value >= 2 && !loadedScenario.value && selectedScenarioId.value) {
+    await onLoadScenario()
+  }
 })
 </script>
 
@@ -868,6 +957,95 @@ onMounted(async () => {
   letter-spacing: 0.04em;
   line-height: 1.6;
 }
+
+/* Result drawer (post-MC) */
+.drawer-result .result-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  margin: var(--sp-4) 0 var(--sp-3);
+}
+.drawer-result .hero-stat {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: var(--sp-3) var(--sp-4);
+}
+.drawer-result .hero-num {
+  font-family: var(--ff-mono);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--el-aether);
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.drawer-result .hero-label {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.drawer-result .hero-ci {
+  margin-top: 6px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.drawer-result .best-intervention {
+  background: color-mix(in srgb, var(--el-aether) 8%, var(--bg-2));
+  border: 1px solid var(--el-aether);
+  border-radius: 10px;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-3);
+}
+.drawer-result .bi-label {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.drawer-result .bi-name {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+.drawer-result .bi-cost {
+  margin-top: 4px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+}
+.drawer-result .all-deltas {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.drawer-result .all-deltas-title {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-bottom: var(--sp-2);
+}
+.drawer-result .delta-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 12px;
+}
+.drawer-result .delta-row:last-child { border-bottom: none; }
+.drawer-result .dr-name { color: var(--ink-1); }
+.drawer-result .dr-lives {
+  color: var(--ink-0);
+  font-family: var(--ff-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .kv-list {
   margin: 0;
   padding: 0;
