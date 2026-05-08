@@ -74,7 +74,13 @@ function bbox(points) {
 
 function project(lat, lon) {
   if (!mapInstance) return [0, 0]
-  const p = mapInstance.latLngToContainerPoint([lat, lon])
+  // latLngToLayerPoint returns coords in the leaflet-pane local frame.
+  // Since our overlay-host is now appended INSIDE the aurora-overlay pane
+  // (which leaflet CSS-transforms during pan), we need pane-local coords
+  // so the SVG circles stay anchored to map features through pan + zoom.
+  // (latLngToContainerPoint would give viewport coords, which would
+  // double-translate when leaflet's pane transform applies.)
+  const p = mapInstance.latLngToLayerPoint([lat, lon])
   return [p.x, p.y]
 }
 
@@ -129,7 +135,29 @@ function initMap() {
     detectRetina: true,
   }).addTo(mapInstance)
 
-  mapInstance.on('move zoom moveend zoomend resize', bumpVersion)
+  // Create a custom leaflet pane to host our SVG overlay, so leaflet's
+  // CSS transform pans/zooms it with the tiles — no JS work per frame.
+  // The pane has z-index 600: above tilePane (200) / overlayPane (400) /
+  // shadowPane (500), below popupPane (700). Leaflet creates panes with
+  // 0×0 intrinsic dimensions, so children must size themselves.
+  const auroraPane = mapInstance.createPane('aurora-overlay')
+  auroraPane.style.zIndex = 600
+  auroraPane.style.pointerEvents = 'none'
+  if (overlayHost.value) {
+    auroraPane.appendChild(overlayHost.value)
+    // Size overlay-host to the map container so the SVG inside has the
+    // same box as the viewport. Leaflet pans the pane via transform,
+    // so this fixed-size box rides along with the map.
+    overlayHost.value.style.width = container.value.clientWidth + 'px'
+    overlayHost.value.style.height = container.value.clientHeight + 'px'
+  }
+
+  // bumpVersion only on ZOOM (scale change) — pan is leaflet-CSS-driven.
+  // This is the perf win: 256 SVG circles no longer recompute cx/cy
+  // every pan frame; only zoom triggers a reproject.
+  mapInstance.on('zoomend resize', bumpVersion)
+  // Also bump on moveend so a programmatic fitBounds settles correctly.
+  mapInstance.on('moveend', bumpVersion)
   ready.value = true
   bumpVersion()
 }
@@ -164,6 +192,11 @@ onMounted(() => {
   if (typeof ResizeObserver !== 'undefined' && container.value) {
     const ro = new ResizeObserver(() => {
       mapInstance?.invalidateSize({ animate: false })
+      // Keep the pane-hosted overlay sized to the container box.
+      if (overlayHost.value && container.value) {
+        overlayHost.value.style.width = container.value.clientWidth + 'px'
+        overlayHost.value.style.height = container.value.clientHeight + 'px'
+      }
       bumpVersion()
     })
     ro.observe(container.value)
@@ -190,14 +223,15 @@ onBeforeUnmount(() => {
   z-index: 0;
 }
 .overlay-host {
+  /* When initMap runs we move this element INSIDE leaflet's
+     `aurora-overlay` pane (z=600), so leaflet's CSS transform pans
+     and scales it with the map. Position/inset/z-index are then
+     leaflet-managed — these styles are the pre-leaflet fallback for
+     the brief moment between mount and initMap.
+     Pointer-events:none lets clicks pass through to the leaflet
+     drag/zoom handlers underneath. */
   position: absolute;
   inset: 0;
-  /* Leaflet's .leaflet-map-pane uses z-index 400 too AND sits later
-     in DOM, so same-z conflict makes the tile-pane paint over us.
-     Bumping to 650 puts overlay above the entire leaflet pane stack
-     (tilePane 200 / overlayPane 400 / shadowPane 500 / markerPane 600)
-     but below the popupPane 700 we don't use. */
-  z-index: 650;
   pointer-events: none;
 }
 .overlay-host > * { pointer-events: none; }
