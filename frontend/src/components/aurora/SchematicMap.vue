@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, provide } from 'vue'
 import DistrictTile from './map/DistrictTile.vue'
 import Building from './map/Building.vue'
 import ResponderIcon from './map/ResponderIcon.vue'
@@ -101,9 +101,42 @@ const props = defineProps({
   },
   /** 'light' | 'dark' — passed straight to MapBasemap. Defaults light per H-bundle. */
   basemapTheme: { type: String, default: 'light' },
+  /** Current playback hour (0..duration_hours). Drives per-hour district color animation. */
+  animationHour: { type: Number, default: -1 },
+  /** Full MC run object (mcRun). Used to read per-hour deaths_by_district from baseline timeline. */
+  mcRun: { type: Object, default: null },
 })
 
 const basemapTheme = computed(() => props.basemapTheme)
+
+/**
+ * Per-district damage ratio at the current animation hour.
+ * Reads from mcRun.baseline.trials[0].timeline[hour].deaths_by_district
+ * and divides by district population to get a 0..1 damage scalar.
+ */
+const damageByDistrict = computed(() => {
+  const out = {}
+  const r = props.mcRun
+  const h = props.animationHour
+  if (!r || h < 0) return out
+  const baseline = r.baseline
+  const trials = baseline?.trials
+  if (!trials || trials.length === 0) return out
+  // Use trial 0 for animation (representative; could median later).
+  const timeline = trials[0]?.timeline ?? []
+  const snap = timeline[Math.min(h, timeline.length - 1)]
+  if (!snap?.deaths_by_district) return out
+  for (const district of (props.scenario.districts ?? [])) {
+    const pop = Math.max(1, district.population ?? 1000)
+    const deaths = snap.deaths_by_district[district.district_id] ?? 0
+    // Damage ratio: 0 = pristine, 1 = catastrophic. Cap at 0.5 so the
+    // color saturation doesn't redline for trivial pop fractions.
+    out[district.district_id] = Math.min(1, deaths / pop * 50)
+  }
+  return out
+})
+
+provide('damageByDistrict', damageByDistrict)
 
 /**
  * Fit the projection to CITY assets only (districts + buildings + facilities).

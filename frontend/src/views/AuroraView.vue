@@ -60,7 +60,12 @@
       <!-- Stage: full-bleed map (Act 2/3) — Act 4/5 will dock more here later -->
       <template #stage>
         <div v-if="loadedScenario" class="stage-map">
-          <SchematicMap :scenario="loadedScenario" :basemap-theme="theme" />
+          <SchematicMap
+            :scenario="loadedScenario"
+            :basemap-theme="theme"
+            :animation-hour="animationHour"
+            :mc-run="mcRun"
+          />
         </div>
         <div v-else class="stage-loading">
           <div class="loading-pulse"></div>
@@ -121,6 +126,33 @@
           </dl>
         </div>
 
+        <!-- LIVE drawer: while MC streams, show progress bars + agent
+             decision feed in real time. Auto-opens on START, auto-swaps
+             to 'result' when the run finishes. -->
+        <div v-if="drawerId === 'live'" class="drawer-content drawer-live">
+          <h3 class="drawer-title">
+            <PhRadio :size="16" weight="duotone" color="var(--el-fire)" />
+            <span>Live · Disaster unfolding</span>
+          </h3>
+          <p class="drawer-blurb">
+            Monte Carlo is running. Progress bars per intervention arm,
+            agent decisions stream below as Gemma 4 reasons in real time.
+          </p>
+          <MCProgressPanel
+            v-if="streamRunId"
+            :run-id="streamRunId"
+            :scenario-id="selectedScenarioId"
+            :arms="streamingArms"
+            @done="onStreamDone"
+            @progress="onStreamProgress"
+            @error="onStreamError"
+          />
+          <div class="live-ticker-wrap">
+            <div class="ticker-label">Agent decision feed</div>
+            <AgentLogTicker :decisions="recentDecisions" :max-visible="6" />
+          </div>
+        </div>
+
         <!-- Post-MC result panel — opens automatically after START completes. -->
         <div v-if="drawerId === 'result' && mcRun" class="drawer-content drawer-result">
           <h3 class="drawer-title">
@@ -156,9 +188,42 @@
               <span class="dr-lives">{{ Math.round(d.lives_saved_mean).toLocaleString() }} lives</span>
             </div>
           </div>
+
+          <!-- Gemma-proposed prevention measures (G5 endpoint) -->
+          <div class="proposals">
+            <div class="proposals-title">
+              <PhSparkle :size="12" weight="fill" color="var(--el-aether)" />
+              <span>Gemma 4 prevention proposals</span>
+              <span v-if="proposingNow" class="proposals-status">analyzing…</span>
+            </div>
+            <div v-if="proposingNow" class="proposals-loading">
+              Gemma 4 e4b is reading the report and selecting targeted
+              prevention measures…
+            </div>
+            <div v-else-if="proposedInterventions?.proposals?.length" class="proposals-list">
+              <div
+                v-for="p in proposedInterventions.proposals"
+                :key="p.intervention_id"
+                class="proposal-card"
+              >
+                <div class="prop-row">
+                  <span class="prop-name">{{ p.label }}</span>
+                  <span class="prop-cost">${{ formatCurrency(p.cost_usd) }}</span>
+                </div>
+                <div class="prop-rationale">{{ p.rationale }}</div>
+              </div>
+              <p v-if="proposedInterventions.summary" class="proposals-summary">
+                {{ proposedInterventions.summary }}
+              </p>
+            </div>
+            <div v-else class="proposals-empty">
+              No proposals returned (Gemma fallback path).
+            </div>
+          </div>
+
           <p class="drawer-cite">
             <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
-            <span>&nbsp;Monte Carlo · paired bootstrap 90% CI · HAZUS-MH 2.1 fragility</span>
+            <span>&nbsp;Monte Carlo · paired bootstrap 90% CI · HAZUS-MH 2.1 fragility · proposals via Gemma 4 e4b</span>
           </p>
         </div>
       </template>
@@ -174,6 +239,8 @@ import {
   PhCpu,
   PhFirstAidKit,
   PhMoon,
+  PhRadio,
+  PhSparkle,
   PhSun,
   PhUsersThree,
   PhWaveSawtooth,
@@ -561,25 +628,23 @@ async function onRunMC() {
   loading.value = true
   errorMsg.value = ''
   mcRun.value = null
+  proposedInterventions.value = null
   recentDecisions.value = []
   runState.value = 'running'
+  // Open the "Live" drawer immediately so user sees agent decisions
+  // streaming + per-arm progress bars while the MC runs.
+  activeDrawerId.value = 'live'
+  shellRef.value?.openDrawer?.('live')
   try {
-    // Direct (sync) MC — streaming MCProgressPanel was deprecated in the
-    // H-bundle CommandShell refactor and is not currently mounted, so the
-    // streaming `done` event never fires. Sync POST returns the full run
-    // body; we drop it into mcRun and open the Result drawer.
-    const resp = await auroraApi.runMonteCarlo(selectedScenarioId.value, {
+    const resp = await auroraApi.runMCStreaming(selectedScenarioId.value, {
       intervention_ids: selectedInterventionIds.value,
       n_trials: nTrials.value,
       duration_hours: durationHours.value,
       n_population_agents: nPopulation.value,
       use_llm: useLLM.value,
     })
-    mcRun.value = resp.data
-    runState.value = 'done'
-    // Auto-open the Result drawer so the user sees outcome immediately.
-    activeDrawerId.value = 'result'
-    shellRef.value?.openDrawer?.('result')
+    streamRunId.value = resp.data.run_id
+    // From here MCProgressPanel polls /progress and emits `progress`/`done`.
   } catch (e) {
     errorMsg.value = `MC run failed: ${e.message}`
     runState.value = 'idle'
@@ -597,13 +662,66 @@ function onStreamProgress(p) {
 async function onStreamDone(result) {
   mcRun.value = result
   runState.value = 'done'
-  // Both `mcRun` and `streamRunId` are mutated in the same reactive flush, so
-  // Vue swaps the streaming panel for the result section in a single render
-  // — no one-frame gap. The panel's polling already stopped before `done`
-  // fired (see MCProgressPanel.poll() → stopPolling on done).
   streamRunId.value = null
   await nextTick()
-  animateResultReveal()
+  // Start the on-map disaster replay (per-hour district color animation).
+  startMapReplay()
+  // Swap drawer: close Live, open Result with hero numbers.
+  activeDrawerId.value = 'result'
+  shellRef.value?.openDrawer?.('result')
+  // Fire Gemma proposals in the background (3-15s on cold cache).
+  fetchProposals(result)
+}
+
+// --- Map replay: animate `animationHour` from 0..duration_hours over
+// ~12 wall-seconds so the SchematicMap can render per-hour district
+// damage progression. Reads from the baseline timeline.
+const animationHour = ref(0)
+let _replayTimer = null
+function startMapReplay() {
+  if (_replayTimer) clearInterval(_replayTimer)
+  const dur = mcRun.value?.duration_hours ?? 24
+  const wallSecondsTotal = 12 // ~half the v3-plan target; tight & legible
+  const tick = (wallSecondsTotal * 1000) / dur
+  let h = 0
+  animationHour.value = 0
+  _replayTimer = setInterval(() => {
+    h += 1
+    animationHour.value = h
+    if (h >= dur) {
+      clearInterval(_replayTimer)
+      _replayTimer = null
+    }
+  }, tick)
+}
+
+// --- Gemma intervention proposals (fired on done) ---
+const proposedInterventions = ref(null)  // {proposals, summary, model, generated_at}
+const proposingNow = ref(false)
+async function fetchProposals(result) {
+  if (!result?.baseline) return
+  proposingNow.value = true
+  try {
+    const baseline = {
+      deaths: Math.round(result.baseline.deaths?.point ?? 0),
+      injuries: Math.round(result.baseline.injuries?.point ?? 0),
+      economic_loss_usd: Math.round(result.baseline.economic_loss_usd?.point ?? 0),
+      duration_hours: result.duration_hours ?? 24,
+      // The frontend doesn't have per-district from the response envelope,
+      // so leave it empty — the backend handles missing district data.
+      deaths_by_district: {},
+    }
+    const resp = await auroraApi.proposeInterventions(
+      selectedScenarioId.value, baseline, 4,
+    )
+    proposedInterventions.value = resp.data
+  } catch (e) {
+    // Non-fatal — Result drawer just doesn't show proposals.
+    console.warn('proposeInterventions failed', e)
+    proposedInterventions.value = { proposals: [], summary: '', model: 'unavailable' }
+  } finally {
+    proposingNow.value = false
+  }
 }
 
 function onStreamError(msg) {
@@ -1044,6 +1162,101 @@ onMounted(async () => {
   color: var(--ink-0);
   font-family: var(--ff-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* Live drawer (during streaming MC) */
+.drawer-live {}
+.drawer-live :deep(.mc-progress-panel) {
+  margin: var(--sp-3) 0;
+}
+.drawer-live .live-ticker-wrap {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.drawer-live .ticker-label {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-bottom: var(--sp-2);
+}
+
+/* Gemma proposals in Result drawer */
+.proposals {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.proposals-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-1);
+  margin-bottom: var(--sp-2);
+}
+.proposals-status {
+  margin-left: auto;
+  color: var(--el-aether);
+  font-style: italic;
+  text-transform: none;
+}
+.proposals-loading {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-style: italic;
+  padding: var(--sp-3);
+  background: var(--bg-2);
+  border-radius: 8px;
+}
+.proposal-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--sp-3);
+  margin-bottom: 8px;
+}
+.prop-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: 4px;
+}
+.prop-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-0);
+  flex: 1;
+}
+.prop-cost {
+  font-family: var(--ff-mono);
+  font-size: 12px;
+  color: var(--el-aether);
+  font-variant-numeric: tabular-nums;
+}
+.prop-rationale {
+  font-size: 11px;
+  color: var(--ink-1);
+  line-height: 1.4;
+}
+.proposals-summary {
+  margin: var(--sp-3) 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  color: var(--ink-2);
+  font-style: italic;
+  line-height: 1.5;
+}
+.proposals-empty {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-style: italic;
 }
 
 .kv-list {
