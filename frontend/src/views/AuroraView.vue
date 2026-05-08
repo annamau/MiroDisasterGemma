@@ -18,7 +18,7 @@
     />
 
     <CommandShell v-else ref="shellRef">
-      <!-- Topbar: back to cities + city/hazard chip + act indicator -->
+      <!-- Topbar: back / title chip / act indicator / START / PAUSE / theme -->
       <template #topbar>
         <button class="topbar-back" @click="goToAct(1)" aria-label="Back to cities">
           <PhArrowLeft :size="14" weight="bold" /> <span>Cities</span>
@@ -34,27 +34,34 @@
           <span class="ai-of">of 5</span>
         </div>
         <button
+          v-if="runState !== 'running'"
+          class="topbar-start"
+          :disabled="!canRun || loading"
+          @click="onRunMC"
+        >
+          <PhPlay :size="13" weight="fill" />
+          <span>{{ mcRun ? 'Re-run' : 'Start simulation' }}</span>
+        </button>
+        <button
+          v-else
+          class="topbar-pause"
+          @click="onPauseRun"
+        >
+          <PhPause :size="13" weight="fill" />
+          <span>Pause</span>
+        </button>
+        <button
           class="topbar-theme"
           :aria-label="theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'"
           @click="toggleTheme"
         >
-          <component
-            :is="theme === 'light' ? PhMoon : PhSun"
-            :size="14"
-            weight="duotone"
-          />
+          <component :is="theme === 'light' ? PhMoon : PhSun" :size="14" weight="duotone" />
         </button>
       </template>
 
-      <!-- Lateral toolbar: groups events into pills, drawer reveals detail -->
-      <template #rail="{ openDrawer }">
-        <EventRail
-          :groups="railGroups"
-          :active-id="activeDrawerId"
-          :start-disabled="!canRun || loading"
-          @open="(id) => { activeDrawerId = id; openDrawer(id) }"
-          @start="onRunMC"
-        />
+      <!-- Lateral toolbar: briefing pills with click-to-expand inline detail -->
+      <template #rail>
+        <EventRail :groups="railGroups" />
       </template>
 
       <!-- Stage: full-bleed map (Act 2/3) — Act 4/5 will dock more here later -->
@@ -73,158 +80,137 @@
         </div>
       </template>
 
-      <!-- Drawer panels: detail per rail group, GSAP slides from rail edge -->
-      <template #drawer="{ drawerId }">
-        <div v-if="drawerId === 'hazard'" class="drawer-content">
-          <h3 class="drawer-title">
-            <PhWaveSawtooth :size="16" weight="duotone" :color="`var(--el-${hazardElement})`" />
-            <span>Hazard</span>
-          </h3>
-          <dl class="kv-list">
-            <div><dt>Kind</dt><dd>{{ loadedScenario?.hazard?.kind ?? '—' }}</dd></div>
-            <div v-if="loadedScenario?.hazard?.magnitude"><dt>Magnitude</dt><dd>M{{ loadedScenario.hazard.magnitude }}</dd></div>
-            <div v-if="loadedScenario?.hazard?.depth_km != null"><dt>Depth</dt><dd>{{ loadedScenario.hazard.depth_km }} km</dd></div>
-            <div><dt>Duration</dt><dd>{{ loadedScenario?.hazard?.duration_hours ?? '—' }} h</dd></div>
-            <div><dt>Districts</dt><dd>{{ loadedScenario?.districts?.length ?? 0 }}</dd></div>
-          </dl>
-          <p class="drawer-cite">
-            Physics: HAZUS-MH 2.1 fragility curves · Omori–Utsu aftershock chain.
-          </p>
-        </div>
+      <!-- Right-side EVENTS panel — always visible. Three states keyed
+           on runState: idle (briefing), running (live MC + agent feed),
+           done (Result hero + Gemma proposals). -->
+      <template #events>
+        <div class="events-panel" :data-state="runState">
 
-        <div v-if="drawerId === 'population'" class="drawer-content">
-          <h3 class="drawer-title">
-            <PhUsersThree :size="16" weight="duotone" color="var(--el-aether)" />
-            <span>Population</span>
-          </h3>
-          <p class="drawer-blurb">
-            <strong>{{ nPopulation }}</strong> agents distributed across
-            <strong>9 archetypes</strong> (eyewitness, coordinator, amplifier,
-            authority, misinformer, conspiracist, helper, helpless, critic).
-            Posting rates vary by phase (acute / coordination / blame).
-          </p>
-          <div class="cfg-inline">
-            <label><span>Population</span><input type="number" v-model.number="nPopulation" min="20" max="500" /></label>
-            <label><span>Hours</span><input type="number" v-model.number="durationHours" min="6" max="72" /></label>
-            <label><span>Trials</span><input type="number" v-model.number="nTrials" min="1" max="64" /></label>
-          </div>
-          <p class="drawer-cite">
-            <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
-            <span>&nbsp;Gemma 4 e2b reasons over each archetype × district × phase. Cached across trials.</span>
-          </p>
-        </div>
-
-        <div v-if="drawerId === 'responders'" class="drawer-content">
-          <h3 class="drawer-title">
-            <PhFirstAidKit :size="16" weight="duotone" color="var(--el-water)" />
-            <span>Responders</span>
-          </h3>
-          <dl class="kv-list">
-            <div><dt>Hospitals</dt><dd>{{ loadedScenario?.hospitals?.length ?? 0 }}</dd></div>
-            <div><dt>Fire stations</dt><dd>{{ loadedScenario?.fire_stations?.length ?? 0 }}</dd></div>
-            <div><dt>Shelters</dt><dd>{{ loadedScenario?.shelters?.length ?? 0 }}</dd></div>
-          </dl>
-        </div>
-
-        <!-- LIVE drawer: while MC streams, show progress bars + agent
-             decision feed in real time. Auto-opens on START, auto-swaps
-             to 'result' when the run finishes. -->
-        <div v-if="drawerId === 'live'" class="drawer-content drawer-live">
-          <h3 class="drawer-title">
-            <PhRadio :size="16" weight="duotone" color="var(--el-fire)" />
-            <span>Live · Disaster unfolding</span>
-          </h3>
-          <p class="drawer-blurb">
-            Monte Carlo is running. Progress bars per intervention arm,
-            agent decisions stream below as Gemma 4 reasons in real time.
-          </p>
-          <MCProgressPanel
-            v-if="streamRunId"
-            :run-id="streamRunId"
-            :scenario-id="selectedScenarioId"
-            :arms="streamingArms"
-            @done="onStreamDone"
-            @progress="onStreamProgress"
-            @error="onStreamError"
-          />
-          <div class="live-ticker-wrap">
-            <div class="ticker-label">Agent decision feed</div>
-            <AgentLogTicker :decisions="recentDecisions" :max-visible="6" />
-          </div>
-        </div>
-
-        <!-- Post-MC result panel — opens automatically after START completes. -->
-        <div v-if="drawerId === 'result' && mcRun" class="drawer-content drawer-result">
-          <h3 class="drawer-title">
-            <PhChartLineUp :size="16" weight="duotone" color="var(--el-aether)" />
-            <span>Result</span>
-          </h3>
-          <p class="drawer-blurb">
-            <strong>{{ mcRun.n_trials }} trials</strong> · {{ mcRun.duration_hours }}h ·
-            wall {{ mcRun.wall_seconds?.toFixed?.(1) ?? mcRun.wall_seconds }}s
-          </p>
-          <div class="result-hero">
-            <div class="hero-stat">
-              <div class="hero-num">{{ Math.round(totalLivesSaved).toLocaleString() }}</div>
-              <div class="hero-label">Lives saved</div>
-              <div v-if="bestLivesCi" class="hero-ci">90% CI {{ Math.round(bestLivesCi.lo).toLocaleString() }} – {{ Math.round(bestLivesCi.hi).toLocaleString() }}</div>
+          <!-- IDLE: nothing has run yet -->
+          <div v-if="runState === 'idle' && !mcRun" class="events-idle">
+            <div class="events-header">
+              <PhInfo :size="14" weight="duotone" color="var(--el-aether)" />
+              <span>Briefing</span>
             </div>
-            <div class="hero-stat">
-              <div class="hero-num">${{ formatCurrency(totalDollarsSaved) }}</div>
-              <div class="hero-label">Dollars saved</div>
+            <p class="events-blurb">
+              Pick a hazard scenario from the rail. Hit
+              <strong>Start simulation</strong> in the topbar to run the
+              Monte Carlo against {{ nPopulation }} archetype agents over
+              {{ durationHours }} hours.
+            </p>
+            <div class="events-meta">
+              <div><PhBuildings :size="12" weight="duotone" color="var(--el-water)" /> {{ loadedScenario?.buildings?.length ?? 0 }} buildings</div>
+              <div><PhFirstAidKit :size="12" weight="duotone" color="var(--el-water)" /> {{ (loadedScenario?.hospitals?.length ?? 0) + (loadedScenario?.fire_stations?.length ?? 0) + (loadedScenario?.shelters?.length ?? 0) }} responders</div>
+              <div><PhUsersThree :size="12" weight="duotone" color="var(--el-aether)" /> {{ nPopulation }} agents · 9 archetypes</div>
+              <div><PhCpu :size="12" weight="duotone" color="var(--el-aether)" /> Gemma 4 e4b · cached</div>
             </div>
-          </div>
-          <div v-if="bestDelta" class="best-intervention">
-            <div class="bi-label">Best intervention</div>
-            <div class="bi-name">{{ bestDelta.label || bestDelta.intervention_id }}</div>
-            <div v-if="bestDelta.dollars_per_life" class="bi-cost">
-              ${{ formatCurrency(bestDelta.dollars_per_life) }} per life saved
+            <div class="events-cfg">
+              <label><span>Trials</span><input type="number" v-model.number="nTrials" min="1" max="64" /></label>
+              <label><span>Population</span><input type="number" v-model.number="nPopulation" min="20" max="500" /></label>
+              <label><span>Hours</span><input type="number" v-model.number="durationHours" min="6" max="72" /></label>
             </div>
+            <p class="events-cite">
+              <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+              &nbsp;Methodology: HAZUS-MH 2.1 fragility · Omori–Utsu aftershock · Gemma 4 reasoning over archetypes per district per phase
+            </p>
           </div>
-          <div v-if="enrichedDeltas.length > 1" class="all-deltas">
-            <div class="all-deltas-title">All interventions</div>
-            <div v-for="d in enrichedDeltas" :key="d.intervention_id" class="delta-row">
-              <span class="dr-name">{{ d.label || d.intervention_id }}</span>
-              <span class="dr-lives">{{ Math.round(d.lives_saved_mean).toLocaleString() }} lives</span>
+
+          <!-- RUNNING: progress bars + agent feed -->
+          <div v-if="runState === 'running'" class="events-running">
+            <div class="events-header">
+              <PhRadio :size="14" weight="duotone" color="var(--el-fire)" />
+              <span>Live · Disaster unfolding</span>
+            </div>
+            <MCProgressPanel
+              v-if="streamRunId"
+              :run-id="streamRunId"
+              :scenario-id="selectedScenarioId"
+              :arms="streamingArms"
+              @done="onStreamDone"
+              @progress="onStreamProgress"
+              @error="onStreamError"
+            />
+            <div class="events-feed">
+              <div class="feed-label">Agent decision feed</div>
+              <AgentLogTicker :decisions="recentDecisions" :max-visible="8" />
             </div>
           </div>
 
-          <!-- Gemma-proposed prevention measures (G5 endpoint) -->
-          <div class="proposals">
-            <div class="proposals-title">
-              <PhSparkle :size="12" weight="fill" color="var(--el-aether)" />
-              <span>Gemma 4 prevention proposals</span>
-              <span v-if="proposingNow" class="proposals-status">analyzing…</span>
+          <!-- DONE: hero result + Gemma proposals -->
+          <div v-if="runState === 'done' && mcRun" class="events-done">
+            <div class="events-header">
+              <PhChartLineUp :size="14" weight="duotone" color="var(--el-aether)" />
+              <span>Outcome · {{ mcRun.n_trials }} trials · {{ mcRun.duration_hours }}h</span>
             </div>
-            <div v-if="proposingNow" class="proposals-loading">
-              Gemma 4 e4b is reading the report and selecting targeted
-              prevention measures…
-            </div>
-            <div v-else-if="proposedInterventions?.proposals?.length" class="proposals-list">
-              <div
-                v-for="p in proposedInterventions.proposals"
-                :key="p.intervention_id"
-                class="proposal-card"
-              >
-                <div class="prop-row">
-                  <span class="prop-name">{{ p.label }}</span>
-                  <span class="prop-cost">${{ formatCurrency(p.cost_usd) }}</span>
-                </div>
-                <div class="prop-rationale">{{ p.rationale }}</div>
+            <div class="result-hero">
+              <div class="hero-stat">
+                <div class="hero-num">{{ Math.round(totalLivesSaved).toLocaleString() }}</div>
+                <div class="hero-label">Lives saved</div>
+                <div v-if="bestLivesCi" class="hero-ci">CI {{ Math.round(bestLivesCi.lo).toLocaleString() }}–{{ Math.round(bestLivesCi.hi).toLocaleString() }}</div>
               </div>
-              <p v-if="proposedInterventions.summary" class="proposals-summary">
-                {{ proposedInterventions.summary }}
-              </p>
+              <div class="hero-stat">
+                <div class="hero-num">${{ formatCurrency(totalDollarsSaved) }}</div>
+                <div class="hero-label">Dollars saved</div>
+              </div>
             </div>
-            <div v-else class="proposals-empty">
-              No proposals returned (Gemma fallback path).
+            <div v-if="bestDelta" class="best-intervention">
+              <div class="bi-label">Best intervention</div>
+              <div class="bi-name">{{ bestDelta.label || bestDelta.intervention_id }}</div>
+              <div v-if="bestDelta.dollars_per_life" class="bi-cost">
+                ${{ formatCurrency(bestDelta.dollars_per_life) }} per life saved
+              </div>
             </div>
+            <div v-if="enrichedDeltas.length > 1" class="all-deltas">
+              <div class="all-deltas-title">All interventions</div>
+              <div v-for="d in enrichedDeltas" :key="d.intervention_id" class="delta-row">
+                <span class="dr-name">{{ d.label || d.intervention_id }}</span>
+                <span class="dr-lives">{{ Math.round(d.lives_saved_mean).toLocaleString() }}</span>
+              </div>
+            </div>
+
+            <!-- Gemma 4 prevention proposals -->
+            <div class="proposals">
+              <div class="proposals-title">
+                <PhSparkle :size="12" weight="fill" color="var(--el-aether)" />
+                <span>Gemma 4 prevention proposals</span>
+                <span v-if="proposingNow" class="proposals-status">analyzing…</span>
+              </div>
+              <div v-if="proposingNow" class="proposals-loading">
+                Gemma 4 e4b is reading the report and selecting prevention measures…
+              </div>
+              <div v-else-if="proposedInterventions?.proposals?.length">
+                <div v-for="p in proposedInterventions.proposals"
+                     :key="p.intervention_id"
+                     class="proposal-card">
+                  <div class="prop-row">
+                    <span class="prop-name">{{ p.label }}</span>
+                    <span class="prop-cost">${{ formatCurrency(p.cost_usd) }}</span>
+                  </div>
+                  <div class="prop-rationale">{{ p.rationale }}</div>
+                </div>
+                <p v-if="proposedInterventions.summary" class="proposals-summary">
+                  {{ proposedInterventions.summary }}
+                </p>
+              </div>
+              <div v-else class="proposals-empty">
+                Gemma did not return proposals (fallback ranking shown).
+              </div>
+            </div>
+
+            <p class="events-cite">
+              <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+              &nbsp;Monte Carlo · 90% CI · HAZUS-MH 2.1 · Gemma 4 e4b
+            </p>
           </div>
 
-          <p class="drawer-cite">
-            <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
-            <span>&nbsp;Monte Carlo · paired bootstrap 90% CI · HAZUS-MH 2.1 fragility · proposals via Gemma 4 e4b</span>
-          </p>
+          <!-- ERROR overlay (any state) -->
+          <div v-if="errorMsg" class="events-error">
+            <PhWarning :size="14" weight="bold" color="var(--el-fire)" />
+            <span>{{ errorMsg }}</span>
+            <button v-if="ollamaError && useLLM" class="retry-btn" @click="retryWithoutLLM">
+              Try without Gemma 4
+            </button>
+          </div>
         </div>
       </template>
     </CommandShell>
@@ -235,14 +221,19 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   PhArrowLeft,
+  PhBuildings,
   PhChartLineUp,
   PhCpu,
   PhFirstAidKit,
+  PhInfo,
   PhMoon,
+  PhPause,
+  PhPlay,
   PhRadio,
   PhSparkle,
   PhSun,
   PhUsersThree,
+  PhWarning,
   PhWaveSawtooth,
 } from '@phosphor-icons/vue'
 import { auroraApi } from '../api/aurora.js'
@@ -275,9 +266,13 @@ const root = ref(null)
 // M7' will URL-bind this via ?act=N. For now it lives only in memory.
 const currentAct = ref(0)
 
-// Lateral rail / drawer state
+// Shell ref (no drawer state; drawer system was removed in the
+// events-panel redesign, but shellRef is still kept for future use).
 const shellRef = ref(null)
-const activeDrawerId = ref(null)
+
+// Map replay timer — declared up here so onPauseRun can clear it
+// before startMapReplay() is defined later in the file.
+let _replayTimer = null
 
 // H4: theme — light by default per civic-tech convention; dark optional
 // for night-ops / low-light demos. Persists in localStorage and reflects
@@ -446,17 +441,27 @@ function formatCurrency(n) {
 
 const railGroups = computed(() => {
   const s = loadedScenario.value
+  const h = s?.hazard
   const respondersTotal =
     (s?.hospitals?.length ?? 0) +
     (s?.fire_stations?.length ?? 0) +
     (s?.shelters?.length ?? 0)
-  const baseGroups = [
+  // Each pill: stat (always visible) + detail (shown when expanded inline).
+  return [
     {
       id: 'hazard',
       label: 'Hazard',
       stat: hazardLabel.value ?? 'Loading…',
       element: hazardElement.value,
       icon: 'WaveSawtooth',
+      detail: h ? [
+        { key: 'Kind', val: h.kind ?? '—' },
+        ...(h.magnitude ? [{ key: 'Magnitude', val: `M${h.magnitude}` }] : []),
+        ...(h.depth_km != null ? [{ key: 'Depth', val: `${h.depth_km} km` }] : []),
+        { key: 'Duration', val: `${h.duration_hours ?? '—'} h` },
+        { key: 'Districts', val: s?.districts?.length ?? 0 },
+      ] : null,
+      cite: 'HAZUS-MH 2.1 fragility · Omori–Utsu aftershock chain',
     },
     {
       id: 'population',
@@ -464,29 +469,27 @@ const railGroups = computed(() => {
       stat: `${nPopulation.value} agents · 9 archetypes`,
       element: 'aether',
       icon: 'UsersThree',
+      detail: [
+        { key: 'Agents', val: nPopulation.value },
+        { key: 'Archetypes', val: 9 },
+        { key: 'Trials', val: nTrials.value },
+        { key: 'Hours', val: durationHours.value },
+      ],
+      cite: 'Gemma 4 e2b reasons over each archetype × district × phase. Cached across trials.',
     },
     {
       id: 'responders',
       label: 'Responders',
-      stat: `${respondersTotal} responders · ${s?.hospitals?.length ?? 0} hosp`,
+      stat: `${respondersTotal} units`,
       element: 'water',
       icon: 'FirstAidKit',
+      detail: [
+        { key: 'Hospitals', val: s?.hospitals?.length ?? 0 },
+        { key: 'Fire stations', val: s?.fire_stations?.length ?? 0 },
+        { key: 'Shelters', val: s?.shelters?.length ?? 0 },
+      ],
     },
   ]
-  // After the MC completes, surface a 4th pill so the user can re-open
-  // the result drawer (auto-opens on completion, but they may close it).
-  if (mcRun.value) {
-    baseGroups.push({
-      id: 'result',
-      label: runState.value === 'running' ? 'Running…' : 'Result',
-      stat: runState.value === 'running'
-        ? 'simulation in progress'
-        : `${Math.round(totalLivesSaved.value).toLocaleString()} lives saved`,
-      element: 'aether',
-      icon: 'ChartLineUp',
-    })
-  }
-  return baseGroups
 })
 
 // --- Computed: streaming arms list ---
@@ -631,10 +634,7 @@ async function onRunMC() {
   proposedInterventions.value = null
   recentDecisions.value = []
   runState.value = 'running'
-  // Open the "Live" drawer immediately so user sees agent decisions
-  // streaming + per-arm progress bars while the MC runs.
-  activeDrawerId.value = 'live'
-  shellRef.value?.openDrawer?.('live')
+  // Events panel auto-shows the running state via runState reactivity.
   try {
     const resp = await auroraApi.runMCStreaming(selectedScenarioId.value, {
       intervention_ids: selectedInterventionIds.value,
@@ -666,18 +666,34 @@ async function onStreamDone(result) {
   await nextTick()
   // Start the on-map disaster replay (per-hour district color animation).
   startMapReplay()
-  // Swap drawer: close Live, open Result with hero numbers.
-  activeDrawerId.value = 'result'
-  shellRef.value?.openDrawer?.('result')
+  // Events panel auto-swaps to 'done' state via runState reactivity.
   // Fire Gemma proposals in the background (3-15s on cold cache).
   fetchProposals(result)
+}
+
+/**
+ * onPauseRun — stop the local map replay AND cancel any in-flight
+ * progress poller. The backend MC keeps running (typical case: it's
+ * already finished from cache anyway), but the user sees the UI
+ * stop animating and the events panel goes back to idle.
+ */
+function onPauseRun() {
+  if (_replayTimer) { clearInterval(_replayTimer); _replayTimer = null }
+  // Mark the run as done if we have data, otherwise reset to idle.
+  if (mcRun.value) {
+    runState.value = 'done'
+  } else {
+    runState.value = 'idle'
+    streamRunId.value = null
+  }
 }
 
 // --- Map replay: animate `animationHour` from 0..duration_hours over
 // ~12 wall-seconds so the SchematicMap can render per-hour district
 // damage progression. Reads from the baseline timeline.
+// (_replayTimer is declared at the top of the script so onPauseRun
+// can reach it.)
 const animationHour = ref(0)
-let _replayTimer = null
 function startMapReplay() {
   if (_replayTimer) clearInterval(_replayTimer)
   const dur = mcRun.value?.duration_hours ?? 24
@@ -974,6 +990,43 @@ onMounted(async () => {
 }
 .topbar-actindex .ai-num { color: var(--ink-0); font-weight: 600; }
 
+/* Topbar primary action: START (green = go) and PAUSE (amber = pause) */
+.topbar-start, .topbar-pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  font-variant-numeric: tabular-nums;
+}
+.topbar-start {
+  background: var(--el-air);
+  color: var(--bg-0);
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.35), 0 4px 14px -6px rgba(138, 201, 38, 0.55);
+}
+.topbar-start:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.5), 0 8px 20px -6px rgba(138, 201, 38, 0.65);
+}
+.topbar-start:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+.topbar-pause {
+  background: var(--el-earth);  /* yellow = caution / pause */
+  color: var(--bg-0);
+  box-shadow: 0 0 0 1px rgba(255, 202, 58, 0.35), 0 4px 14px -6px rgba(255, 202, 58, 0.5);
+}
+.topbar-pause:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(255, 202, 58, 0.5), 0 8px 20px -6px rgba(255, 202, 58, 0.65);
+}
+
 .topbar-theme {
   width: 30px;
   height: 30px;
@@ -993,6 +1046,124 @@ onMounted(async () => {
   color: var(--ink-0);
 }
 .topbar-theme:focus-visible { outline: 2px solid var(--el-aether); outline-offset: 2px; }
+
+/* ---- Right-side EVENTS panel ---- */
+.events-panel {
+  padding: 14px var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 100%;
+  position: relative;
+}
+.events-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.events-blurb {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-1);
+  line-height: 1.55;
+}
+.events-blurb strong { color: var(--ink-0); font-weight: 600; }
+.events-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-3);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+}
+.events-meta > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.events-cfg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.events-cfg label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  gap: 8px;
+}
+.events-cfg input[type='number'] {
+  width: 70px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--ink-0);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.events-cite {
+  margin: auto 0 0;  /* push to bottom of flex column */
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.events-feed {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.feed-label {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+.events-error {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--el-fire) 14%, var(--bg-2));
+  color: var(--ink-0);
+  border: 1px solid var(--el-fire);
+  border-radius: 6px;
+  padding: 8px var(--sp-3);
+  font-size: 12px;
+}
+.events-error .retry-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--ink-2);
+  color: var(--ink-0);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
 
 /* ---- Stage ---- */
 .stage-map {
