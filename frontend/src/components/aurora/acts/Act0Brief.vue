@@ -64,21 +64,28 @@ defineEmits(['continue'])
 // but it primes the visual lexicon used in Act 4.
 const MMI_BINS = bins('earthquake')
 
-// Entrance choreography: data-anim children stagger up.
+// Entrance choreography: data-anim children stagger up. Guarded so a
+// background-tab navigation can't leave the page invisible: GSAP
+// `from()` puts elements at opacity:0 then animates back to 1; if the
+// timeline stalls (tab throttled), they stay invisible. We only
+// kick off the entrance if the tab is visible AND set a 1.5s
+// fail-safe that force-restores opacity even if the tween never ran.
 onMounted(() => {
   if (typeof window === 'undefined') return
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  if (reduceMotion) return
+  const tabHidden = document.visibilityState === 'hidden'
+  if (reduceMotion || tabHidden) return  // Skip animation; CSS shows everything
+
   const items = document.querySelectorAll('.act-brief [data-anim]')
-  if (!items.length) return
-  gsap.from(items, {
-    y: 18,
-    opacity: 0,
-    duration: 0.55,
-    ease: 'power3.out',
-    stagger: 0.08,
-  })
-  // Wordmark pulses in slightly larger then settles
+  if (items.length) {
+    gsap.from(items, {
+      y: 18,
+      opacity: 0,
+      duration: 0.55,
+      ease: 'power3.out',
+      stagger: 0.08,
+    })
+  }
   const wm = document.querySelector('.act-brief .wordmark')
   if (wm) {
     gsap.from(wm, {
@@ -87,7 +94,6 @@ onMounted(() => {
       ease: 'power2.out',
     })
   }
-  // MMI scale stripe: cells light up left to right
   gsap.from('.act-brief .mmi-stripe span', {
     scaleY: 0,
     transformOrigin: 'bottom',
@@ -96,6 +102,22 @@ onMounted(() => {
     stagger: 0.05,
     delay: 0.4,
   })
+
+  // Fail-safe: if GSAP's tween never reaches opacity:1 within 1.5s
+  // (e.g. tab was hidden mid-flight, browser throttled the timeline),
+  // force-restore visibility so the page is never left blank.
+  setTimeout(() => {
+    items.forEach((el) => {
+      if (parseFloat(getComputedStyle(el).opacity) < 0.95) {
+        el.style.opacity = '1'
+        el.style.transform = 'none'
+      }
+    })
+    if (wm && parseFloat(getComputedStyle(wm).opacity) < 0.95) {
+      wm.style.opacity = '1'
+      wm.style.transform = 'none'
+    }
+  }, 1500)
 })
 </script>
 

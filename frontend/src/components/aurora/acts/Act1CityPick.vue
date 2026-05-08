@@ -166,10 +166,13 @@ const extraCities = computed(() =>
 )
 
 // Entrance choreography: header drops in, then cards stagger from below.
+// Same fail-safe as Act 0: skip when tab hidden + force-restore opacity
+// after 1.5s in case the tween got throttled.
 function playEntrance() {
   if (typeof window === 'undefined') return
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  if (reduceMotion) return
+  const tabHidden = document.visibilityState === 'hidden'
+  if (reduceMotion || tabHidden) return
   const head = document.querySelector('.act-city-pick [data-anim]')
   const cards = document.querySelectorAll('.act-city-pick [data-anim="card"]')
   if (head) gsap.from(head, { y: 14, opacity: 0, duration: 0.45, ease: 'power3.out' })
@@ -183,6 +186,15 @@ function playEntrance() {
       delay: 0.15,
     })
   }
+  setTimeout(() => {
+    const all = [head, ...cards].filter(Boolean)
+    all.forEach((el) => {
+      if (parseFloat(getComputedStyle(el).opacity) < 0.95) {
+        el.style.opacity = '1'
+        el.style.transform = 'none'
+      }
+    })
+  }, 1500)
 }
 
 onMounted(playEntrance)
