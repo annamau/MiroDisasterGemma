@@ -551,13 +551,24 @@ def propose_interventions(scenario_id: str):
         # Default to e4b for proposals (better reasoning); fall back to e2b if e4b is missing.
         for model_name in ("gemma4:e4b", "gemma4:e2b"):
             try:
-                resp = client.chat_json(
+                # `chat_json` returns a 2-tuple: (parsed_dict_or_None, raw_LLMResponse).
+                # An earlier revision treated the return value as the parsed dict
+                # directly, which caused EVERY proposal request to fall through
+                # to the deterministic ranking. Unpack correctly.
+                parsed, raw_resp = client.chat_json(
                     system=system_prompt,
                     user=user_prompt,
                     model=model_name,
                 )
-                # chat_json returns either a dict or a JSON string per impl.
-                parsed = resp if isinstance(resp, dict) else _safe_json(resp)
+                if not isinstance(parsed, dict):
+                    # Last-resort salvage: try to pluck a JSON object out of
+                    # raw content (handles markdown fences, leaked thinking).
+                    parsed = _safe_json(raw_resp.content if raw_resp else "")
+                if not isinstance(parsed, dict):
+                    raise ValueError(
+                        f"propose: model {model_name} returned non-dict "
+                        f"(type={type(parsed).__name__}); falling through"
+                    )
                 raw_proposals = parsed.get("proposals") or []
                 summary = (parsed.get("summary") or "")[:200]
                 for p in raw_proposals[:max_n]:
@@ -573,8 +584,18 @@ def propose_interventions(scenario_id: str):
                         "cost_usd": iv.cost_usd,
                         "cost_source": iv.cost_source,
                     })
-                model_used = model_name
-                break
+                if proposals:
+                    model_used = model_name
+                    logger.info(
+                        "propose: %s returned %d proposals (summary=%r)",
+                        model_name, len(proposals), summary[:60],
+                    )
+                    break
+                # else: fall through to next model — empty proposals isn't useful.
+                logger.warning(
+                    "propose: %s returned 0 valid proposals; trying next",
+                    model_name,
+                )
             except Exception:
                 logger.exception(f"propose: model {model_name} failed; trying next")
     except Exception:
