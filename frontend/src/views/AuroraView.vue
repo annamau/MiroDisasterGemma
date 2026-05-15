@@ -218,7 +218,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, shallowReactive, watch } from 'vue'
 import {
   PhArrowLeft,
   PhBuildings,
@@ -270,9 +270,13 @@ const currentAct = ref(0)
 // events-panel redesign, but shellRef is still kept for future use).
 const shellRef = ref(null)
 
-// Map replay timer — declared up here so onPauseRun can clear it
-// before startMapReplay() is defined later in the file.
-let _replayTimer = null
+// Per-scenario map replay timers. Each entry is
+//   { intervalId, runId }
+// keyed by scenario_id. This replaces the singleton _replayTimer so a
+// timer that started under one scenario can be cancelled or self-clear
+// when the user navigates to a different city (F1 — cross-city replay
+// leak). onPauseRun and startMapReplay both go through this Map.
+const _replayTimers = new Map()
 
 // H4: theme — light by default per civic-tech convention; dark optional
 // for night-ops / low-light demos. Persists in localStorage and reflects
@@ -307,38 +311,136 @@ const reduceMotion = () =>
 // --- State ---
 const scenarios = ref([])
 const selectedScenarioId = ref('la-puente-hills-m72-ref')
-// Interventions: long-term plan is post-sim Gemma proposal (M6'
-// Prevention Lab). For the current demo we seed three high-leverage
-// LA-D03 interventions so the first START fires with non-zero deltas
-// and the Result drawer shows real lives_saved/dollars_saved numbers.
-// When the case is non-LA, the backend MC simply ignores intervention
-// IDs that don't apply (no error) so this is safe across scenarios.
 const interventions = ref([])
-const selectedInterventionIds = ref([
-  'preposition_d03_4amb',
-  'evac_d03_30min_early',
-  'retrofit_d03_w1',
-])
-const nTrials = ref(8)
-const nPopulation = ref(80)
-const durationHours = ref(24)
-// MC trials default to synth-only for fast, animated demos (deterministic
-// archetype actions + cache-baked decisions). Gemma 4 still drives the
-// post-MC "propose interventions" panel and the named-witness feed —
-// the agent decision feed is templated, not LLM-generated, so it stays
-// snappy. Set `?gemma=full` to re-enable per-cell LLM calls (slow path).
-const useLLM = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 
-const mcRun = ref(null)
-const streamRunId = ref(null)
-const runState = ref('idle') // idle | running | done
-const recentDecisions = ref([])
+// Phase 1 — Per-scenario state preservation.
+// Every Monte Carlo run, intervention selection, animation step, and
+// loaded scenario blob lives in its OWN entry inside `scenarioStates`,
+// keyed by scenario_id. Switching cities just changes which entry the
+// computed getters below read from — prior runs stay intact. The map
+// is `shallowReactive` so MC payload arrays (huge per-trial timelines)
+// don't trigger deep proxy traversal every SchematicMap re-render.
+const scenarioStates = shallowReactive({})
 
-// M2: holds the full loaded scenario object (buildings, districts, facilities)
-// populated by onLoadScenario; drives <SchematicMap>.
-const loadedScenario = ref(null)
+// `?gemma=full` URL flag sets this; new scenarios created later inherit
+// it as their default useLLM. Existing scenarios already in the map get
+// the flag retroactively when applyActFromUrl parses it.
+const _globalUseLLM = ref(false)
+
+function initScenarioState(id) {
+  if (!id) return
+  // Cap at 6 entries to bound memory across long demo sessions.
+  if (Object.keys(scenarioStates).length >= 6 && !scenarioStates[id]) {
+    console.warn('Aurora: scenarioStates at cap (6); cannot init', id)
+    return
+  }
+  if (scenarioStates[id]) return
+  scenarioStates[id] = {
+    mcRun: null,
+    streamRunId: null,
+    runState: 'idle',
+    recentDecisions: [],
+    selectedInterventionIds: [],
+    proposedInterventions: null,
+    animationHour: 0,
+    nTrials: 8,
+    nPopulation: 80,
+    durationHours: 24,
+    lastRunAt: null,
+    useLLM: _globalUseLLM.value,
+    loadedScenario: null,
+    // Reserved for Phase 2b — keep []
+    mcRunHistory: [],
+  }
+}
+
+function setForCurrent(field, value) {
+  const id = selectedScenarioId.value
+  if (!id) return
+  if (!scenarioStates[id]) initScenarioState(id)
+  // Guard against the cap-refused case.
+  if (!scenarioStates[id]) return
+  scenarioStates[id][field] = value
+}
+
+// Eagerly seed the default scenario so first-paint reads return defaults
+// instead of `undefined`.
+initScenarioState(selectedScenarioId.value)
+
+// --- Per-scenario computed getters ----------------------------------------
+// Reads go through scenarioStates[selectedScenarioId.value]. For getters
+// that the template writes back via .value = X (mcRun/runState/...), we
+// use writable computeds that mutate the current scenario's entry. For
+// v-model.number bindings (nTrials/nPopulation/durationHours) we also
+// need writable computeds so the input change updates per-scenario state.
+//
+// For selectedInterventionIds: returning the underlying array reference
+// is fine because the array lives inside a shallowReactive — push/splice
+// on it triggers the parent re-render via the shallowReactive proxy.
+function _cur() {
+  const id = selectedScenarioId.value
+  return id ? scenarioStates[id] : null
+}
+
+const mcRun = computed({
+  get: () => _cur()?.mcRun ?? null,
+  set: (v) => setForCurrent('mcRun', v),
+})
+const streamRunId = computed({
+  get: () => _cur()?.streamRunId ?? null,
+  set: (v) => setForCurrent('streamRunId', v),
+})
+const runState = computed({
+  get: () => _cur()?.runState ?? 'idle',
+  set: (v) => setForCurrent('runState', v),
+})
+const recentDecisions = computed({
+  get: () => _cur()?.recentDecisions ?? [],
+  set: (v) => setForCurrent('recentDecisions', v),
+})
+const selectedInterventionIds = computed({
+  get: () => _cur()?.selectedInterventionIds ?? [],
+  set: (v) => setForCurrent('selectedInterventionIds', v),
+})
+const proposedInterventions = computed({
+  get: () => _cur()?.proposedInterventions ?? null,
+  set: (v) => setForCurrent('proposedInterventions', v),
+})
+const loadedScenario = computed({
+  get: () => _cur()?.loadedScenario ?? null,
+  set: (v) => setForCurrent('loadedScenario', v),
+})
+const animationHour = computed({
+  get: () => _cur()?.animationHour ?? 0,
+  set: (v) => setForCurrent('animationHour', v),
+})
+const nTrials = computed({
+  get: () => _cur()?.nTrials ?? 8,
+  set: (v) => setForCurrent('nTrials', v),
+})
+const nPopulation = computed({
+  get: () => _cur()?.nPopulation ?? 80,
+  set: (v) => setForCurrent('nPopulation', v),
+})
+const durationHours = computed({
+  get: () => _cur()?.durationHours ?? 24,
+  set: (v) => setForCurrent('durationHours', v),
+})
+// useLLM falls back to the URL-flagged default for scenarios that haven't
+// been initialised yet (computed getters can be hit before init for
+// brand-new ids). Once an entry exists, its own value wins.
+const useLLM = computed({
+  get: () => {
+    const cur = _cur()
+    return cur ? cur.useLLM : _globalUseLLM.value
+  },
+  set: (v) => setForCurrent('useLLM', v),
+})
+
+// === PHASE 2B INSERTS COMPUTEDS HERE ===
+// e.g. currentAct, mcRunHistory views, etc.
 
 // Detect Ollama-not-running so we can offer the "Try without Gemma 4" path.
 const ollamaError = computed(() => {
@@ -596,7 +698,9 @@ async function loadIndex() {
 }
 
 async function onLoadScenario() {
-  if (!selectedScenarioId.value) return
+  const targetId = selectedScenarioId.value
+  if (!targetId) return
+  if (!scenarioStates[targetId]) initScenarioState(targetId)
   loading.value = true
   errorMsg.value = ''
   try {
@@ -604,9 +708,13 @@ async function onLoadScenario() {
     // populate the schematic map. The legacy /load route is Neo4j-backed
     // for graph-tools persistence — not needed for the map. Decoupling
     // means the demo runs even when Docker / Neo4j aren't up.
-    const resp = await auroraApi.previewScenario(selectedScenarioId.value)
+    const resp = await auroraApi.previewScenario(targetId)
     // resp is the {success, data} envelope; resp.data is the scenario.
-    if (resp?.data) loadedScenario.value = resp.data
+    // Write to the captured target id's entry (not the now-current one)
+    // so mid-flight scenario switches don't cross-write.
+    if (resp?.data && scenarioStates[targetId]) {
+      scenarioStates[targetId].loadedScenario = resp.data
+    }
     await loadIndex()
   } catch (e) {
     errorMsg.value = `Load failed: ${e.message}`
@@ -616,21 +724,35 @@ async function onLoadScenario() {
 }
 
 // M2.1: auto-preview on scenario selection — no need for a "Refresh DB"
-// click. The map appears as soon as the user picks a scenario.
+// click. The map appears as soon as the user picks a scenario. Phase 1
+// adds a per-scenario init + a "skip if already loaded" guard so flipping
+// back to a city the user already visited is instant.
 watch(selectedScenarioId, async (newId) => {
   if (!newId) return
-  // The earlier watcher clears loadedScenario; this kicks off a fresh preview.
-  await onLoadScenario()
+  if (!scenarioStates[newId]) initScenarioState(newId)
+  if (!scenarioStates[newId]?.loadedScenario) {
+    await onLoadScenario()
+  }
 })
 
 function toggleIntervention(id) {
-  const idx = selectedInterventionIds.value.indexOf(id)
-  if (idx === -1) selectedInterventionIds.value.push(id)
-  else selectedInterventionIds.value.splice(idx, 1)
+  // selectedInterventionIds is a computed that returns the underlying
+  // array reference from scenarioStates[currentId]. Push/splice mutate
+  // in place — shallowReactive propagates the change.
+  const list = selectedInterventionIds.value
+  const idx = list.indexOf(id)
+  if (idx === -1) list.push(id)
+  else list.splice(idx, 1)
 }
+
+// === PHASE 2B INSERTS HERE === (e.g. toggleProposal — keep adjacent to
+// toggleIntervention so the two click paths stay together.)
 
 async function onRunMC() {
   if (loading.value || !canRun.value) return
+  // === PHASE 2B INSERTS HERE ===
+  // AbortController per-scenario setup + mcRunHistory.push() before
+  // the existing reset lines below.
   loading.value = true
   errorMsg.value = ''
   mcRun.value = null
@@ -679,9 +801,18 @@ async function onStreamDone(result) {
  * progress poller. The backend MC keeps running (typical case: it's
  * already finished from cache anyway), but the user sees the UI
  * stop animating and the events panel goes back to idle.
+ *
+ * Phase 1: only clears the timer for the CURRENT scenario so pausing
+ * in city A doesn't kill an animation that was already running in
+ * city B (or that the user paused-then-navigated-back-to).
  */
 function onPauseRun() {
-  if (_replayTimer) { clearInterval(_replayTimer); _replayTimer = null }
+  const id = selectedScenarioId.value
+  const t = _replayTimers.get(id)
+  if (t) {
+    clearInterval(t.intervalId)
+    _replayTimers.delete(id)
+  }
   // Mark the run as done if we have data, otherwise reset to idle.
   if (mcRun.value) {
     runState.value = 'done'
@@ -693,32 +824,52 @@ function onPauseRun() {
 
 // --- Map replay: animate `animationHour` from 0..duration_hours over
 // ~12 wall-seconds so the SchematicMap can render per-hour district
-// damage progression. Reads from the baseline timeline.
-// (_replayTimer is declared at the top of the script so onPauseRun
-// can reach it.)
-const animationHour = ref(0)
+// damage progression. Reads from the baseline timeline. Each interval
+// is tagged with the scenario_id and the streamRunId that started it,
+// so a tick fires on a city the user has since navigated away from
+// (or that another run started under) will self-clear.
 function startMapReplay() {
-  if (_replayTimer) clearInterval(_replayTimer)
+  const id = selectedScenarioId.value
+  if (!id) return
+  if (!scenarioStates[id]) initScenarioState(id)
+  // The token: prefer the in-flight streamRunId; fall back to a synthetic
+  // `done-…` token when the run already completed and we're just animating.
+  const runToken = scenarioStates[id]?.streamRunId ?? `done-${Date.now()}`
+  // Cancel any prior timer on this scenario before starting a new one.
+  const prior = _replayTimers.get(id)
+  if (prior) clearInterval(prior.intervalId)
+
   const dur = mcRun.value?.duration_hours ?? 24
   const wallSecondsTotal = 12 // ~half the v3-plan target; tight & legible
   const tick = (wallSecondsTotal * 1000) / dur
   let h = 0
-  animationHour.value = 0
-  _replayTimer = setInterval(() => {
+  if (scenarioStates[id]) scenarioStates[id].animationHour = 0
+
+  const intervalId = setInterval(() => {
+    const cur = scenarioStates[id]
+    // Self-clear if the entry vanished or another run took over.
+    if (!cur || (cur.streamRunId !== runToken && !runToken.startsWith('done-'))) {
+      clearInterval(intervalId)
+      _replayTimers.delete(id)
+      return
+    }
     h += 1
-    animationHour.value = h
+    cur.animationHour = h
     if (h >= dur) {
-      clearInterval(_replayTimer)
-      _replayTimer = null
+      clearInterval(intervalId)
+      _replayTimers.delete(id)
     }
   }, tick)
+  _replayTimers.set(id, { intervalId, runId: runToken })
 }
 
 // --- Gemma intervention proposals (fired on done) ---
-const proposedInterventions = ref(null)  // {proposals, summary, model, generated_at}
 const proposingNow = ref(false)
 async function fetchProposals(result) {
   if (!result?.baseline) return
+  const targetId = selectedScenarioId.value
+  if (!targetId) return
+  if (!scenarioStates[targetId]) initScenarioState(targetId)
   proposingNow.value = true
   try {
     const baseline = {
@@ -730,14 +881,20 @@ async function fetchProposals(result) {
       // so leave it empty — the backend handles missing district data.
       deaths_by_district: {},
     }
-    const resp = await auroraApi.proposeInterventions(
-      selectedScenarioId.value, baseline, 4,
-    )
-    proposedInterventions.value = resp.data
+    const resp = await auroraApi.proposeInterventions(targetId, baseline, 4)
+    // Write back to the captured target scenario — the user may have
+    // navigated away while Gemma was thinking.
+    if (scenarioStates[targetId]) {
+      scenarioStates[targetId].proposedInterventions = resp.data
+    }
   } catch (e) {
     // Non-fatal — Result drawer just doesn't show proposals.
     console.warn('proposeInterventions failed', e)
-    proposedInterventions.value = { proposals: [], summary: '', model: 'unavailable' }
+    if (scenarioStates[targetId]) {
+      scenarioStates[targetId].proposedInterventions = {
+        proposals: [], summary: '', model: 'unavailable',
+      }
+    }
   } finally {
     proposingNow.value = false
   }
@@ -775,14 +932,11 @@ function animateResultReveal() {
   })
 }
 
-// Auto-reset run state if user changes scenario / interventions after a run.
-watch([selectedScenarioId, selectedInterventionIds], () => {
-  if (runState.value === 'done') {
-    // Keep the result visible but allow a fresh run.
-    runState.value = 'idle'
-  }
-})
-
+// Phase 1: the previous `watch([selectedScenarioId, selectedInterventionIds])`
+// that forced runState back to 'idle' on any change is no longer needed —
+// each scenario carries its own runState in scenarioStates, so switching
+// cities naturally reveals whatever state THAT city last had.
+//
 // (M2.1 collapsed: the auto-preview watch above replaces both the
 // stale-clear and the explicit "Refresh DB" click. Picking a scenario
 // = loading its preview into the map immediately.)
@@ -793,13 +947,21 @@ async function applyDemoSeed() {
   if (typeof window === 'undefined') return
   const params = new URLSearchParams(window.location.search)
   if (params.get('seed') !== 'demo') return
-  selectedScenarioId.value = 'la-puente-hills-m72-ref'
-  selectedInterventionIds.value = []
-  nTrials.value = 20
-  nPopulation.value = 80
-  durationHours.value = 24
+  const id = 'la-puente-hills-m72-ref'
+  if (!scenarioStates[id]) initScenarioState(id)
+  // Demo-tuned MC params for the seeded scenario.
+  if (scenarioStates[id]) {
+    scenarioStates[id].selectedInterventionIds = []
+    scenarioStates[id].nTrials = 20
+    scenarioStates[id].nPopulation = 80
+    scenarioStates[id].durationHours = 24
+  }
+  selectedScenarioId.value = id
   currentAct.value = 2  // demo skips brand + city pick
   await loadIndex()
+  // Force the preview explicitly — if `id` was already the default,
+  // assigning it to selectedScenarioId.value is a no-op for the watch.
+  await onLoadScenario()
   setTimeout(() => {
     if (canRun.value && runState.value === 'idle') onRunMC()
   }, 1000)
@@ -858,10 +1020,17 @@ function applyActFromUrl() {
   if (Number.isFinite(a) && a >= 0 && a <= 5) {
     currentAct.value = a
   }
-  if (params.get('gemma') === 'full') {
-    useLLM.value = true
-  } else if (params.get('gemma') === 'off') {
-    useLLM.value = false
+  // ?gemma flag flips _globalUseLLM (the default for any future entries
+  // initialised by initScenarioState) AND propagates onto every existing
+  // entry so the user immediately sees the change everywhere they've
+  // already been.
+  const gem = params.get('gemma')
+  if (gem === 'full' || gem === 'off') {
+    const v = gem === 'full'
+    _globalUseLLM.value = v
+    for (const k of Object.keys(scenarioStates)) {
+      scenarioStates[k].useLLM = v
+    }
   }
 }
 
