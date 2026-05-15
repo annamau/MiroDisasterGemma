@@ -362,7 +362,22 @@ function setForCurrent(field, value) {
   if (!scenarioStates[id]) initScenarioState(id)
   // Guard against the cap-refused case.
   if (!scenarioStates[id]) return
-  scenarioStates[id][field] = value
+  // CRITICAL: shallowReactive only tracks top-level key writes. Mutating
+  // an inner property (scenarioStates[id].field = value) reads as a dep
+  // on the [id] key but never invalidates the computed cache, leaving
+  // the UI frozen on same-scenario state changes. Replace the entry
+  // object atomically so the top-level write fires reactivity.
+  scenarioStates[id] = { ...scenarioStates[id], [field]: value }
+}
+
+// setForId: same atomic-replace semantics as setForCurrent, but writes
+// to an explicit scenario id rather than the current selection. Used by
+// async paths (onLoadScenario, fetchProposals) that capture the target
+// id at call time so a mid-flight scenario switch doesn't cross-write.
+function setForId(id, field, value) {
+  if (!id) return
+  if (!scenarioStates[id]) return
+  scenarioStates[id] = { ...scenarioStates[id], [field]: value }
 }
 
 // Eagerly seed the default scenario so first-paint reads return defaults
@@ -711,9 +726,10 @@ async function onLoadScenario() {
     const resp = await auroraApi.previewScenario(targetId)
     // resp is the {success, data} envelope; resp.data is the scenario.
     // Write to the captured target id's entry (not the now-current one)
-    // so mid-flight scenario switches don't cross-write.
+    // so mid-flight scenario switches don't cross-write. Use atomic
+    // entry replacement so shallowReactive fires the computed deps.
     if (resp?.data && scenarioStates[targetId]) {
-      scenarioStates[targetId].loadedScenario = resp.data
+      setForId(targetId, 'loadedScenario', resp.data)
     }
     await loadIndex()
   } catch (e) {
@@ -736,13 +752,18 @@ watch(selectedScenarioId, async (newId) => {
 })
 
 function toggleIntervention(id) {
-  // selectedInterventionIds is a computed that returns the underlying
-  // array reference from scenarioStates[currentId]. Push/splice mutate
-  // in place — shallowReactive propagates the change.
+  // selectedInterventionIds is a computed backed by
+  // scenarioStates[currentId].selectedInterventionIds. shallowReactive
+  // does NOT track inner-property mutations, so push/splice on the
+  // returned array reference would never invalidate the computed.
+  // Replace the array with a new one via setForCurrent so the entry
+  // object is re-assigned at the top level (the reactivity boundary).
   const list = selectedInterventionIds.value
   const idx = list.indexOf(id)
-  if (idx === -1) list.push(id)
-  else list.splice(idx, 1)
+  const next = idx === -1
+    ? [...list, id]
+    : [...list.slice(0, idx), ...list.slice(idx + 1)]
+  setForCurrent('selectedInterventionIds', next)
 }
 
 // === PHASE 2B INSERTS HERE === (e.g. toggleProposal — keep adjacent to
@@ -843,7 +864,8 @@ function startMapReplay() {
   const wallSecondsTotal = 12 // ~half the v3-plan target; tight & legible
   const tick = (wallSecondsTotal * 1000) / dur
   let h = 0
-  if (scenarioStates[id]) scenarioStates[id].animationHour = 0
+  // Atomic-replace reset so SchematicMap re-renders to hour 0.
+  if (scenarioStates[id]) setForId(id, 'animationHour', 0)
 
   const intervalId = setInterval(() => {
     const cur = scenarioStates[id]
@@ -854,7 +876,10 @@ function startMapReplay() {
       return
     }
     h += 1
-    cur.animationHour = h
+    // Atomic replace so SchematicMap (and any other animationHour-derived
+    // computed) re-evaluates each tick. Direct `cur.animationHour = h`
+    // would be a shallowReactive-invisible inner mutation — UI freezes.
+    setForId(id, 'animationHour', h)
     if (h >= dur) {
       clearInterval(intervalId)
       _replayTimers.delete(id)
@@ -883,17 +908,19 @@ async function fetchProposals(result) {
     }
     const resp = await auroraApi.proposeInterventions(targetId, baseline, 4)
     // Write back to the captured target scenario — the user may have
-    // navigated away while Gemma was thinking.
+    // navigated away while Gemma was thinking. Atomic replace so the
+    // proposedInterventions computed fires for whichever scenario is
+    // currently selected (if it matches targetId).
     if (scenarioStates[targetId]) {
-      scenarioStates[targetId].proposedInterventions = resp.data
+      setForId(targetId, 'proposedInterventions', resp.data)
     }
   } catch (e) {
     // Non-fatal — Result drawer just doesn't show proposals.
     console.warn('proposeInterventions failed', e)
     if (scenarioStates[targetId]) {
-      scenarioStates[targetId].proposedInterventions = {
+      setForId(targetId, 'proposedInterventions', {
         proposals: [], summary: '', model: 'unavailable',
-      }
+      })
     }
   } finally {
     proposingNow.value = false
@@ -949,12 +976,18 @@ async function applyDemoSeed() {
   if (params.get('seed') !== 'demo') return
   const id = 'la-puente-hills-m72-ref'
   if (!scenarioStates[id]) initScenarioState(id)
-  // Demo-tuned MC params for the seeded scenario.
+  // Demo-tuned MC params for the seeded scenario. Single atomic-replace
+  // so the four writes batch into one reactivity invalidation rather
+  // than four direct inner-property mutations (which shallowReactive
+  // would not see at all).
   if (scenarioStates[id]) {
-    scenarioStates[id].selectedInterventionIds = []
-    scenarioStates[id].nTrials = 20
-    scenarioStates[id].nPopulation = 80
-    scenarioStates[id].durationHours = 24
+    scenarioStates[id] = {
+      ...scenarioStates[id],
+      selectedInterventionIds: [],
+      nTrials: 20,
+      nPopulation: 80,
+      durationHours: 24,
+    }
   }
   selectedScenarioId.value = id
   currentAct.value = 2  // demo skips brand + city pick
@@ -1028,8 +1061,13 @@ function applyActFromUrl() {
   if (gem === 'full' || gem === 'off') {
     const v = gem === 'full'
     _globalUseLLM.value = v
+    // Atomic entry replacement per key so the useLLM computed fires for
+    // whichever scenario is currently selected. Direct
+    // `scenarioStates[k].useLLM = v` would be invisible to
+    // shallowReactive and leave the UI showing the wrong gemma toggle
+    // state.
     for (const k of Object.keys(scenarioStates)) {
-      scenarioStates[k].useLLM = v
+      setForId(k, 'useLLM', v)
     }
   }
 }

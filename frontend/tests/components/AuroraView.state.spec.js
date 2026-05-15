@@ -343,23 +343,122 @@ describe('Phase 1 — scenarioStates: cap', () => {
 })
 
 // ---------------------------------------------------------------------------
-// M-1 — Rapid same-id writes → at most one preview fetch
+// U10 — Same-scenario writes propagate to computed reads (reactivity proof)
 // ---------------------------------------------------------------------------
-describe('Phase 1 — misuse: rapid same-id writes', () => {
-  test('M1: 100 rapid same-id scenario writes trigger at most 1 preview fetch', async () => {
+// This is the regression test for the shallowReactive trap. Pre-fix, the
+// computed getter would cache its first read of scenarioStates[id].mcRun
+// and never see a nested mutation, leaving `vm.mcRun.tag === 'first'`
+// even after a `setForCurrent('mcRun', { tag: 'second' })` write. The
+// fix replaces the entry object atomically; that top-level key write
+// invalidates the dep and the computed re-evaluates.
+//
+// If you remove the atomic-replace in setForCurrent and revert to
+// `scenarioStates[id][field] = value`, this test MUST fail on the
+// second assertion (vm.mcRun.tag stays 'first' or stale).
+// ---------------------------------------------------------------------------
+describe('Phase 1 — scenarioStates: same-scenario reactivity', () => {
+  test('U10: same-scenario write to computed propagates on next read', async () => {
+    const { wrapper, setup } = await mountView()
+    // LA is the default selectedScenarioId.
+    expect(setup.selectedScenarioId).toBe('la-puente-hills-m72-ref')
+
+    setup.setForCurrent('mcRun', { tag: 'first' })
+    await nextTick()
+    // Read via the computed (which is what the template consumes).
+    expect(wrapper.vm.mcRun).toEqual({ tag: 'first' })
+
+    // Second write on the SAME scenario — this is the path that froze
+    // pre-fix. The computed read must reflect the new value.
+    setup.setForCurrent('mcRun', { tag: 'second' })
+    await nextTick()
+    expect(wrapper.vm.mcRun).toEqual({ tag: 'second' })
+
+    // A third write to round-trip — exercises the steady-state path
+    // where the entry has already been replaced once.
+    setup.setForCurrent('mcRun', { tag: 'third' })
+    await nextTick()
+    expect(wrapper.vm.mcRun).toEqual({ tag: 'third' })
+  })
+
+  test('U10b: animationHour writes from startMapReplay propagate per tick', async () => {
+    vi.useFakeTimers()
+    try {
+      const { wrapper, setup } = await mountView()
+      // Seed a 6-hour MC result so the replay duration is short.
+      setup.setForCurrent('mcRun', { duration_hours: 6 })
+      setup.setForCurrent('streamRunId', 'run-A')
+      setup.startMapReplay()
+
+      // Replay resets animationHour to 0 first.
+      expect(wrapper.vm.animationHour).toBe(0)
+
+      // Advance time enough for at least one tick (tick = 2000ms for
+      // duration_hours=6 over 12 wall seconds).
+      vi.advanceTimersByTime(2500)
+      await nextTick()
+      // The computed must reflect the new animationHour the timer wrote
+      // through setForId. Pre-fix this would stay at 0 because
+      // shallowReactive missed the inner mutation.
+      expect(wrapper.vm.animationHour).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M-1 — Rapid alternating-scenario flips don't corrupt state or over-fetch
+// ---------------------------------------------------------------------------
+// Reviewer note: the prior M-1 wrote the same value 100x. Vue dedupes
+// identical scalar writes natively, so a buggy "no dedupe" implementation
+// would still have passed. The adversarial form flips between two
+// distinct scenario ids — that forces the watcher to fire on every
+// change, and tests that the previewScenario calls coalesce to at most
+// one per unique id and that no exception is thrown.
+// ---------------------------------------------------------------------------
+describe('Phase 1 — misuse: rapid alternating-scenario flips', () => {
+  test('M1: rapid LA<->Valencia flipping does not corrupt state or over-fetch', async () => {
     const { setup } = await mountView()
     const { auroraApi } = await import('@/api/aurora')
-    // Mount already kicked off the initial onLoadScenario for LA via
-    // onMounted's deep-link guard or by act init. Reset the counter.
+    // Mount already kicked off the initial onLoadScenario for LA. Clear
+    // the counter so we only see the flips below.
     auroraApi.previewScenario.mockClear()
-    for (let i = 0; i < 100; i++) {
-      setup.selectedScenarioId = 'la-puente-hills-m72-ref'
+
+    // 50 flips = 100 assignments alternating LA → Valencia → LA → ...
+    let threw = null
+    try {
+      for (let i = 0; i < 50; i++) {
+        setup.selectedScenarioId = 'la-puente-hills-m72-ref'
+        setup.selectedScenarioId = 'valencia-dana-2024'
+      }
+    } catch (e) {
+      threw = e
     }
+    expect(threw).toBeNull()
     await flushPromises()
-    // The watch is keyed on (selectedScenarioId, ...) — assigning the
-    // same value does NOT fire the watcher. So zero or one preview call
-    // is acceptable; what we forbid is N>1.
-    expect(auroraApi.previewScenario.mock.calls.length).toBeLessThanOrEqual(1)
+
+    // At most one preview call per unique scenario id — the watch
+    // dedupes consecutive identical writes natively, and the
+    // `if (!loadedScenario) await onLoadScenario()` guard prevents
+    // re-fetching once an entry has its scenario.
+    expect(auroraApi.previewScenario.mock.calls.length).toBeLessThanOrEqual(2)
+
+    // Both entries exist and are fully initialised with the default shape.
+    const la = setup.scenarioStates['la-puente-hills-m72-ref']
+    const vlc = setup.scenarioStates['valencia-dana-2024']
+    expect(la).toBeTruthy()
+    expect(vlc).toBeTruthy()
+    for (const entry of [la, vlc]) {
+      // Default shape from initScenarioState.
+      expect(entry.mcRun).toBeNull()
+      expect(entry.runState).toBe('idle')
+      expect(entry.selectedInterventionIds).toEqual([])
+      expect(entry.nTrials).toBe(8)
+      expect(entry.nPopulation).toBe(80)
+      expect(entry.durationHours).toBe(24)
+    }
+    // No spurious extra entries (the flip only touched 2 ids).
+    expect(Object.keys(setup.scenarioStates).length).toBe(2)
   })
 })
 
