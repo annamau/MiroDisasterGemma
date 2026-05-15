@@ -39,6 +39,15 @@
               :radius="districtRadius"
             />
 
+            <!-- Hazard halo: epicenter + shockwave (quake) / inundation
+                 ring (flood). Sits ABOVE districts so the wavefront is
+                 visible over the puck tint, BELOW buildings so it doesn't
+                 obscure them. -->
+            <HazardHalo
+              v-if="scenario.hazard"
+              :hazard="scenario.hazard"
+            />
+
             <!-- Building dots -->
             <Building
               v-for="building in scenario.buildings"
@@ -68,6 +77,13 @@
       </LeafletStage>
     </template>
 
+    <!-- Replay clock overlay (top-right). Hidden when no replay is
+         active (animationHour < 0). -->
+    <TimeClock
+      :animation-hour="animationHour"
+      :total-hours="mcRun?.duration_hours ?? 24"
+    />
+
     <!-- Legend overlay -->
     <div v-if="(scenario.buildings ?? []).length > 0" class="legend">
       <div class="legend-row"><span class="dot dot-water"></span><span>Wood frame</span></div>
@@ -92,6 +108,8 @@ import { computed, provide } from 'vue'
 import DistrictTile from './map/DistrictTile.vue'
 import Building from './map/Building.vue'
 import ResponderIcon from './map/ResponderIcon.vue'
+import HazardHalo from './map/HazardHalo.vue'
+import TimeClock from './map/TimeClock.vue'
 import LeafletStage from './LeafletStage.vue'
 
 const props = defineProps({
@@ -112,7 +130,13 @@ const basemapTheme = computed(() => props.basemapTheme)
 /**
  * Per-district damage ratio at the current animation hour.
  * Reads from mcRun.baseline.trials[0].timeline[hour].deaths_by_district
- * and divides by district population to get a 0..1 damage scalar.
+ * and rescales by district population so districts visibly progress
+ * from 0 (pristine) → 1 (catastrophic) over the replay.
+ *
+ * Calibration: a district with 1k+ deaths per 100k pop (~1%) should
+ * saturate the damage palette. That's 100× the raw ratio, vs the
+ * earlier 50× — at the previous gain even M7.2-LA's worst district
+ * only reached ratio≈0.15 at end-of-replay (barely tinted).
  */
 const damageByDistrict = computed(() => {
   const out = {}
@@ -122,21 +146,40 @@ const damageByDistrict = computed(() => {
   const baseline = r.baseline
   const trials = baseline?.trials
   if (!trials || trials.length === 0) return out
-  // Use trial 0 for animation (representative; could median later).
   const timeline = trials[0]?.timeline ?? []
   const snap = timeline[Math.min(h, timeline.length - 1)]
   if (!snap?.deaths_by_district) return out
   for (const district of (props.scenario.districts ?? [])) {
     const pop = Math.max(1, district.population ?? 1000)
     const deaths = snap.deaths_by_district[district.district_id] ?? 0
-    // Damage ratio: 0 = pristine, 1 = catastrophic. Cap at 0.5 so the
-    // color saturation doesn't redline for trivial pop fractions.
-    out[district.district_id] = Math.min(1, deaths / pop * 50)
+    out[district.district_id] = Math.min(1, (deaths / pop) * 100)
+  }
+  return out
+})
+
+/**
+ * Final per-district damage at end-of-replay (used for "destroyed building"
+ * thresholding when the replay is past that district's curve). Lets
+ * buildings keep their final dead state after the replay ends.
+ */
+const finalDamageByDistrict = computed(() => {
+  const out = {}
+  const r = props.mcRun
+  if (!r) return out
+  const trial0 = r.baseline?.trials?.[0]
+  const finalDxD = trial0?.deaths_by_district ?? {}
+  for (const district of (props.scenario.districts ?? [])) {
+    const pop = Math.max(1, district.population ?? 1000)
+    const deaths = finalDxD[district.district_id] ?? 0
+    out[district.district_id] = Math.min(1, (deaths / pop) * 100)
   }
   return out
 })
 
 provide('damageByDistrict', damageByDistrict)
+provide('finalDamageByDistrict', finalDamageByDistrict)
+provide('animationHour', computed(() => props.animationHour))
+provide('totalHours', computed(() => props.mcRun?.duration_hours ?? 24))
 
 /**
  * Fit the projection to CITY assets only (districts + buildings + facilities).

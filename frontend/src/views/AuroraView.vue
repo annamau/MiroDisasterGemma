@@ -1004,6 +1004,13 @@ async function onRunMC() {
     recentDecisions.value = []
     runState.value = 'running'
     streamRunId.value = resp.data.run_id
+    // Kick the cinematic map replay BEFORE results land. During the
+    // running phase mcRun is null, so DistrictTile / Building consumers
+    // read a {} damage map — but HazardHalo's epicenter pulse + shockwave
+    // rings + TimeClock all animate purely off animationHour. This makes
+    // the live phase feel like a disaster unfolding rather than a static
+    // map waiting for a result.
+    startMapReplay()
   } catch (e) {
     // Aborted by a superseding Re-run on the same scenario — benign.
     if (e?.name === 'AbortError' || e?.name === 'CanceledError') {
@@ -1103,8 +1110,18 @@ function startMapReplay() {
     // would be a shallowReactive-invisible inner mutation — UI freezes.
     setForId(id, 'animationHour', h)
     if (h >= dur) {
-      clearInterval(intervalId)
-      _replayTimers.delete(id)
+      // While runState is 'running' (Act 3 — MC still computing), loop
+      // the clock back to 0 so the disaster keeps unfolding until the
+      // real result lands and onStreamDone re-fires startMapReplay
+      // with the final mcRun data. While 'done', the clock stops at
+      // duration and the building/district damage stays at final state.
+      if (cur.runState === 'running') {
+        h = 0
+        setForId(id, 'animationHour', 0)
+      } else {
+        clearInterval(intervalId)
+        _replayTimers.delete(id)
+      }
     }
   }, tick)
   _replayTimers.set(id, { intervalId, runId: runToken })
