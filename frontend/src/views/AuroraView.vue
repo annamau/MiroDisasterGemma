@@ -30,7 +30,7 @@
           <span v-if="hazardLabel" class="haz" :class="`haz-${hazardElement}`">{{ hazardLabel }}</span>
         </div>
         <div class="topbar-actindex">
-          <span class="ai-num">Act {{ currentAct }}</span>
+          <span class="ai-num">Act {{ derivedAct }}</span>
           <span class="ai-of">of 5</span>
         </div>
         <button
@@ -136,8 +136,11 @@
             </div>
           </div>
 
-          <!-- DONE: hero result + Gemma proposals -->
-          <div v-if="runState === 'done' && mcRun" class="events-done">
+          <!-- DONE (Act 4): hero result + Gemma proposals. Phase 2b
+               narrows the original `runState === 'done' && mcRun` gate
+               to `derivedAct === 4` so Act 5 (Prevention Lab) can take
+               over once the judge picks 1+ proposals. -->
+          <div v-if="derivedAct === 4 && mcRun" class="events-done">
             <div class="events-header">
               <PhChartLineUp :size="14" weight="duotone" color="var(--el-aether)" />
               <span>Outcome · {{ mcRun.n_trials }} trials · {{ mcRun.duration_hours }}h</span>
@@ -179,22 +182,111 @@
                 Gemma 4 e4b is reading the report and selecting prevention measures…
               </div>
               <div v-else-if="proposedInterventions?.proposals?.length">
-                <div v-for="p in proposedInterventions.proposals"
-                     :key="p.intervention_id"
-                     class="proposal-card">
+                <!-- Sticky CTA: "Re-run with N selected · +$X.YM".
+                     Disabled when 0 proposals are picked OR a run is
+                     already in flight. The cost is the SUM of selected
+                     proposal cost_usd values (selectedCostTotal). -->
+                <div class="rerun-cta">
+                  <button
+                    type="button"
+                    class="rerun-button"
+                    :disabled="selectedInterventionIds.length === 0 || loading"
+                    @click="onRerunClick"
+                  >
+                    <PhPlay :size="13" weight="fill" />
+                    <span v-if="selectedInterventionIds.length === 0">
+                      Pick at least one proposal
+                    </span>
+                    <span v-else>
+                      Re-run with {{ selectedInterventionIds.length }} selected
+                      <span class="rerun-cost">· +${{ formatCurrency(selectedCostTotal) }}</span>
+                    </span>
+                  </button>
+                </div>
+                <button
+                  v-for="p in proposedInterventions.proposals"
+                  :key="p.intervention_id"
+                  :class="['proposal-card', { selected: selectedInterventionIds.includes(p.intervention_id) }]"
+                  :aria-pressed="selectedInterventionIds.includes(p.intervention_id)"
+                  type="button"
+                  @click="toggleProposal(p.intervention_id)"
+                >
                   <div class="prop-row">
+                    <span class="prop-check" aria-hidden="true">
+                      <PhCheck v-if="selectedInterventionIds.includes(p.intervention_id)" :size="14" weight="bold" />
+                    </span>
                     <span class="prop-name">{{ p.label }}</span>
                     <span class="prop-cost">${{ formatCurrency(p.cost_usd) }}</span>
                   </div>
                   <div class="prop-rationale">{{ p.rationale }}</div>
-                </div>
+                </button>
                 <p v-if="proposedInterventions.summary" class="proposals-summary">
                   {{ proposedInterventions.summary }}
                 </p>
               </div>
+              <!-- Phase 2a followup: scenarios with no intervention catalog
+                   (Pompeii/Joplin/Turkey/Atlantis) come back from the
+                   propose endpoint with model='none' and an honest summary
+                   string. The old copy "Gemma did not return proposals
+                   (fallback ranking shown)" was misleading there — surface
+                   the backend summary instead. -->
+              <div v-else-if="proposedInterventions?.model === 'none'" class="proposals-empty">
+                {{ proposedInterventions.summary || 'No interventions modelled for this scenario.' }}
+              </div>
               <div v-else class="proposals-empty">
                 Gemma did not return proposals (fallback ranking shown).
               </div>
+            </div>
+
+            <p class="events-cite">
+              <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+              &nbsp;Monte Carlo · 90% CI · HAZUS-MH 2.1 · Gemma 4 e4b
+            </p>
+          </div>
+
+          <!-- ACT 5: Prevention Lab. Takes over the events panel once
+               the judge has selected 1+ proposals and the MC arms have
+               returned deltas. Shows a 2-col DeltaCard grid + a
+               "Previous: …" pill drawn from mcRunHistory[0], plus an
+               inline Re-run CTA so the loop is self-contained. -->
+          <div v-if="derivedAct === 5" class="events-act5">
+            <div class="events-header">
+              <PhFlask :size="14" weight="fill" color="var(--el-aether)" />
+              <span>Prevention Lab · {{ enrichedDeltas.length }} intervention{{ enrichedDeltas.length === 1 ? '' : 's' }}</span>
+            </div>
+
+            <div v-if="previousRunSummary" class="prev-pill">
+              Previous: {{ previousRunSummary.lives.toLocaleString() }} lives
+              <span v-if="previousRunSummary.cpls != null">at ${{ formatCurrency(previousRunSummary.cpls) }}/life</span>
+              — {{ previousRunSummary.label }}
+            </div>
+
+            <div class="act5-grid">
+              <DeltaCard
+                v-for="d in enrichedDeltas"
+                :key="d.intervention_id"
+                :delta="d"
+              />
+            </div>
+
+            <!-- Re-run CTA inline so the judge can iterate without
+                 scrolling back to the Outcome panel. -->
+            <div v-if="proposedInterventions?.proposals?.length" class="rerun-cta">
+              <button
+                type="button"
+                class="rerun-button"
+                :disabled="selectedInterventionIds.length === 0 || loading"
+                @click="onRerunClick"
+              >
+                <PhPlay :size="13" weight="fill" />
+                <span v-if="selectedInterventionIds.length === 0">
+                  Pick at least one proposal
+                </span>
+                <span v-else>
+                  Re-run with {{ selectedInterventionIds.length }} selected
+                  <span class="rerun-cost">· +${{ formatCurrency(selectedCostTotal) }}</span>
+                </span>
+              </button>
             </div>
 
             <p class="events-cite">
@@ -223,8 +315,10 @@ import {
   PhArrowLeft,
   PhBuildings,
   PhChartLineUp,
+  PhCheck,
   PhCpu,
   PhFirstAidKit,
+  PhFlask,
   PhInfo,
   PhMoon,
   PhPause,
@@ -277,6 +371,14 @@ const shellRef = ref(null)
 // when the user navigates to a different city (F1 — cross-city replay
 // leak). onPauseRun and startMapReplay both go through this Map.
 const _replayTimers = new Map()
+
+// Phase 2b — Per-scenario AbortControllers for in-flight MC runs. A new
+// Re-run on the same scenario aborts the prior request first so the
+// post-await `.then(...)` write doesn't race against the fresh run's
+// state. The controller is dropped from the map once the request
+// settles (try/finally in onRunMC). Same Map shape as _replayTimers
+// for symmetry. We keep it as a const Map (no reactivity needed).
+const _inflightControllers = new Map()
 
 // H4: theme — light by default per civic-tech convention; dark optional
 // for night-ops / low-light demos. Persists in localStorage and reflects
@@ -456,6 +558,54 @@ const useLLM = computed({
 
 // === PHASE 2B INSERTS COMPUTEDS HERE ===
 // e.g. currentAct, mcRunHistory views, etc.
+//
+// derivedAct: the topbar pill display value for Acts 2..5. `currentAct`
+// (the ref) still owns Acts 0 and 1 (brand + city pick) — those are the
+// raw-route screens. For 2..5 we DERIVE the act from runState + mcRun +
+// selectedInterventionIds so the pill ticks through Briefing → Live →
+// Outcome → Prevention Lab without anyone having to call goToAct.
+//
+// Transitions (Acts 2..5 only):
+//   2 — briefing default; nothing has run yet
+//   3 — runState === 'running' (live MC + agent feed)
+//   4 — done + 0 selected interventions (Outcome hero + proposal cards)
+//   5 — done + 1+ selected + deltas present (Prevention Lab grid)
+const derivedAct = computed(() => {
+  if (currentAct.value < 2) return currentAct.value
+  if (runState.value === 'running') return 3
+  if (mcRun.value && runState.value === 'done') {
+    if (
+      selectedInterventionIds.value.length > 0 &&
+      mcRun.value.deltas?.length > 0
+    ) {
+      return 5
+    }
+    return 4
+  }
+  return 2
+})
+
+// Total $ cost of the proposals currently selected. Drives the
+// "Re-run with N selected · +$X.YM" CTA label. Returns 0 when there are
+// no proposals OR no selection so callers can safely format without
+// branching on null.
+const selectedCostTotal = computed(() => {
+  const props = proposedInterventions.value?.proposals ?? []
+  return selectedInterventionIds.value.reduce((sum, id) => {
+    const p = props.find((x) => x.intervention_id === id)
+    return sum + (p?.cost_usd ?? 0)
+  }, 0)
+})
+
+// "Previous: …" pill drawn above the Act 5 DeltaCard grid. Pulls the
+// most recent entry from this scenario's mcRunHistory (FIFO-capped to 3
+// by the push in onRunMC). Null until at least one Re-run has fired.
+const previousRunSummary = computed(() => {
+  const id = selectedScenarioId.value
+  if (!id) return null
+  const hist = scenarioStates[id]?.mcRunHistory ?? []
+  return hist.length > 0 ? hist[0] : null
+})
 
 // Detect Ollama-not-running so we can offer the "Try without Gemma 4" path.
 const ollamaError = computed(() => {
@@ -766,36 +916,108 @@ function toggleIntervention(id) {
   setForCurrent('selectedInterventionIds', next)
 }
 
-// === PHASE 2B INSERTS HERE === (e.g. toggleProposal — keep adjacent to
-// toggleIntervention so the two click paths stay together.)
+// Phase 2b — proposal-card click handler. Identical semantics to
+// toggleIntervention (atomic-replace selectedInterventionIds via
+// setForCurrent so shallowReactive fires the per-scenario computed).
+// Kept as a named alias rather than inlining toggleIntervention in the
+// template so the click path reads "toggleProposal(id)" — matches the
+// surface verb the judge sees in the Outcome panel.
+function toggleProposal(id) {
+  toggleIntervention(id)
+}
+
+// Phase 2b — Re-run CTA click handler. The button's `disabled` attribute
+// blocks normal UA clicks, but accessibility paths (e.g. keyboard
+// dispatch or assistive tech) can still fire the event. This JS-level
+// gate is the source of truth: only call onRunMC when at least one
+// proposal is selected. (The first/baseline run uses the topbar Start
+// button which doesn't go through this gate.)
+function onRerunClick() {
+  if (selectedInterventionIds.value.length === 0) return
+  onRunMC()
+}
 
 async function onRunMC() {
   if (loading.value || !canRun.value) return
-  // === PHASE 2B INSERTS HERE ===
-  // AbortController per-scenario setup + mcRunHistory.push() before
-  // the existing reset lines below.
+
+  const sid = selectedScenarioId.value
+
+  // Phase 2b — Abort any prior in-flight MC POST on this scenario so
+  // its post-await write can't race the fresh run. The axios call
+  // settles either way (we surface AbortError as a benign no-op below);
+  // the backend still owns the actual run lifecycle via streamRunId.
+  if (_inflightControllers.has(sid)) {
+    _inflightControllers.get(sid).abort()
+  }
+  const controller = new AbortController()
+  _inflightControllers.set(sid, controller)
+
   loading.value = true
   errorMsg.value = ''
-  mcRun.value = null
-  proposedInterventions.value = null
-  recentDecisions.value = []
-  runState.value = 'running'
-  // Events panel auto-shows the running state via runState reactivity.
   try {
-    const resp = await auroraApi.runMCStreaming(selectedScenarioId.value, {
+    // Phase 2a followup — fire the POST FIRST so an idempotent backend
+    // response ({status: 'already_running'}) is observable before we
+    // wipe local state. The backend is fast (~tens of ms cached); only
+    // when it confirms a fresh `started` run do we clear the panel.
+    const resp = await auroraApi.runMCStreaming(sid, {
       intervention_ids: selectedInterventionIds.value,
       n_trials: nTrials.value,
       duration_hours: durationHours.value,
       n_population_agents: nPopulation.value,
       use_llm: useLLM.value,
     })
+
+    // Idempotent rejoin: same in-flight run, no state changes.
+    if (resp.data?.status === 'already_running') {
+      streamRunId.value = resp.data.run_id
+      return
+    }
+
+    // Real new run — snapshot previous best into mcRunHistory BEFORE
+    // wiping. The Act 5 "Previous: …" pill reads this; FIFO cap of 3
+    // keeps history bounded without a TTL sweep. We compute the
+    // snapshot via enrichedDeltas to reuse its ci/dollar flattening.
+    if (mcRun.value && mcRun.value.deltas?.length > 0) {
+      const cur = scenarioStates[sid] ?? {}
+      const best = enrichedDeltas.value.length
+        ? [...enrichedDeltas.value].sort(
+            (a, b) => b.lives_saved_mean - a.lives_saved_mean,
+          )[0]
+        : null
+      const newHistory = [
+        {
+          at: Date.now(),
+          lives: best ? Math.round(best.lives_saved_mean) : 0,
+          cpls: best?.dollars_per_life ?? null,
+          label: best?.label ?? '—',
+          ids: [...selectedInterventionIds.value],
+        },
+        ...(cur.mcRunHistory ?? []),
+      ].slice(0, 3)
+      setForId(sid, 'mcRunHistory', newHistory)
+    }
+
+    // Wipe panel state and flip to 'running' — MCProgressPanel polls
+    // /progress and emits `progress`/`done` from here.
+    mcRun.value = null
+    proposedInterventions.value = null
+    recentDecisions.value = []
+    runState.value = 'running'
     streamRunId.value = resp.data.run_id
-    // From here MCProgressPanel polls /progress and emits `progress`/`done`.
   } catch (e) {
+    // Aborted by a superseding Re-run on the same scenario — benign.
+    if (e?.name === 'AbortError' || e?.name === 'CanceledError') {
+      return
+    }
     errorMsg.value = `MC run failed: ${e.message}`
     runState.value = 'idle'
   } finally {
     loading.value = false
+    // Drop the controller IFF it's still the one we registered (a newer
+    // run on this scenario may have already overwritten it).
+    if (_inflightControllers.get(sid) === controller) {
+      _inflightControllers.delete(sid)
+    }
   }
 }
 
@@ -1599,11 +1821,76 @@ onMounted(async () => {
   border-radius: 8px;
 }
 .proposal-card {
+  /* Phase 2b: proposal-card is now a <button> so the judge can toggle
+     selection. The visual shell is unchanged; only the button-reset and
+     selected-state styling is new. */
+  appearance: none;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: var(--sp-3);
   margin-bottom: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  color: inherit;
+  font: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.proposal-card:hover { background: var(--bg-1); border-color: var(--ink-2); }
+.proposal-card:focus-visible {
+  outline: 2px solid var(--el-aether);
+  outline-offset: 2px;
+}
+.proposal-card.selected {
+  border-color: var(--el-aether);
+  background: color-mix(in srgb, var(--el-aether) 8%, var(--bg-2));
+}
+.prop-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  color: var(--el-aether);
+}
+.rerun-cta {
+  margin: 0 0 var(--sp-3);
+}
+.rerun-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--el-air);
+  color: var(--bg-0);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.35), 0 4px 14px -6px rgba(138, 201, 38, 0.5);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.rerun-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.5), 0 8px 20px -6px rgba(138, 201, 38, 0.65);
+}
+.rerun-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.rerun-cost {
+  font-weight: 600;
+  opacity: 0.9;
 }
 .prop-row {
   display: flex;
@@ -1641,6 +1928,35 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--ink-2);
   font-style: italic;
+}
+
+/* Phase 2b — Act 5 Prevention Lab section in the events panel. */
+.events-act5 {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.act5-grid {
+  display: grid;
+  /* Wide events-panel (>~580px viewport on the right pane) renders
+     2 columns; narrow stacks to 1. */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+.prev-pill {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px var(--sp-3);
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kv-list {
