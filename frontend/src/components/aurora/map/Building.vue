@@ -4,11 +4,12 @@
     data-aurora-building
     :cx="cx"
     :cy="cy"
-    :r="radius"
+    :r="effectiveRadius"
     :fill="dynamicColor"
-    stroke="rgba(255,255,255,0.85)"
+    :stroke="dynamicStroke"
     stroke-width="0.5"
-    opacity="0.92"
+    :opacity="dynamicOpacity"
+    style="transition: fill 0.4s ease, opacity 0.4s ease, r 0.4s ease;"
   />
 </template>
 
@@ -52,20 +53,80 @@ const HAZUS_COLOR = {
   C1M: 'var(--el-earth)',
   PC1: 'var(--el-aether)',
 }
-// Damage-state color: red. Buildings interpolate from pristine → red as
-// the district's damage ratio rises toward 1.
-const DAMAGE_COLOR = '#d6322f'
+// Damage palette: pristine → orange (warning) → red (damaged) → dark
+// charcoal (destroyed). A building progresses through these as the
+// district's damage ratio rises past its individual fragility threshold.
+const WARN_COLOR = '#f4a045'   // amber
+const DAMAGE_COLOR = '#d6322f' // red
+const DEAD_COLOR = '#3a2326'   // near-black charcoal
 
 // Read the live per-district damage ratio (0..1) injected by SchematicMap.
 const damageByDistrict = inject('damageByDistrict', { value: {} })
 
+/**
+ * Deterministic per-building "fragility offset" in [0, 1). Buildings with
+ * lower offset die earlier as the district's damage ratio rises; ones with
+ * higher offset hold out longer. Drives the visible "spreading damage"
+ * effect — without it, every building in a district would change color
+ * in lockstep and the eye sees no propagation.
+ */
+const fragilityOffset = computed(() => {
+  const id = String(props.building.building_id ?? '')
+  let h = 0
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h) + id.charCodeAt(i)
+    h |= 0
+  }
+  // Map int hash → [0, 1); spread offsets across the range so destruction
+  // looks like a propagating wave, not a discrete step.
+  return (Math.abs(h) % 1000) / 1000
+})
+
+// Per-building damage state. Compares the district's live damage ratio
+// against this building's individual fragility threshold + transition
+// band, producing one of four states.
+const buildingState = computed(() => {
+  const ratio = damageByDistrict.value?.[props.building.district_id] ?? 0
+  if (ratio <= 0) return 'pristine'
+  // Threshold = fragilityOffset, mapped into [0.05, 0.95] so even the
+  // most fragile building survives the first tick and the toughest
+  // eventually falls if the district approaches catastrophic.
+  const threshold = 0.05 + fragilityOffset.value * 0.9
+  // Soft transition band of 0.15 — buildings spend a moment in "warning"
+  // and "damaged" states before going fully "dead".
+  if (ratio < threshold - 0.15) return 'pristine'
+  if (ratio < threshold)        return 'warning'
+  if (ratio < threshold + 0.15) return 'damaged'
+  return 'dead'
+})
+
 const dynamicColor = computed(() => {
   const base = HAZUS_COLOR[props.building.hazus_class] ?? 'var(--ink-1)'
-  const ratio = damageByDistrict.value?.[props.building.district_id] ?? 0
-  if (ratio <= 0) return base
-  // Use color-mix to blend from base → DAMAGE_COLOR by ratio.
-  // pct: 0 → base, 100 → red. Round to nearest 10 to keep CSS reasonable.
-  const pct = Math.min(100, Math.round(ratio * 100 / 10) * 10)
-  return `color-mix(in srgb, ${DAMAGE_COLOR} ${pct}%, ${base})`
+  switch (buildingState.value) {
+    case 'pristine': return base
+    case 'warning':  return WARN_COLOR
+    case 'damaged':  return DAMAGE_COLOR
+    case 'dead':     return DEAD_COLOR
+    default:         return base
+  }
+})
+
+// Dead buildings shrink and fade slightly — they read as rubble dots
+// rather than active structures. The transition CSS on the circle smooths
+// the size + opacity change so the eye registers the shift as an event.
+const effectiveRadius = computed(() => {
+  return buildingState.value === 'dead'
+    ? props.radius * 0.55
+    : props.radius
+})
+
+const dynamicOpacity = computed(() => {
+  return buildingState.value === 'dead' ? 0.7 : 0.92
+})
+
+const dynamicStroke = computed(() => {
+  return buildingState.value === 'dead'
+    ? 'rgba(0, 0, 0, 0.4)'
+    : 'rgba(255, 255, 255, 0.85)'
 })
 </script>
