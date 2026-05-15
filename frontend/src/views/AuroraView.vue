@@ -30,7 +30,7 @@
           <span v-if="hazardLabel" class="haz" :class="`haz-${hazardElement}`">{{ hazardLabel }}</span>
         </div>
         <div class="topbar-actindex">
-          <span class="ai-num">Act {{ currentAct }}</span>
+          <span class="ai-num">Act {{ derivedAct }}</span>
           <span class="ai-of">of 5</span>
         </div>
         <button
@@ -136,8 +136,11 @@
             </div>
           </div>
 
-          <!-- DONE: hero result + Gemma proposals -->
-          <div v-if="runState === 'done' && mcRun" class="events-done">
+          <!-- DONE (Act 4): hero result + Gemma proposals. Phase 2b
+               narrows the original `runState === 'done' && mcRun` gate
+               to `derivedAct === 4` so Act 5 (Prevention Lab) can take
+               over once the judge picks 1+ proposals. -->
+          <div v-if="derivedAct === 4 && mcRun" class="events-done">
             <div class="events-header">
               <PhChartLineUp :size="14" weight="duotone" color="var(--el-aether)" />
               <span>Outcome · {{ mcRun.n_trials }} trials · {{ mcRun.duration_hours }}h</span>
@@ -179,22 +182,111 @@
                 Gemma 4 e4b is reading the report and selecting prevention measures…
               </div>
               <div v-else-if="proposedInterventions?.proposals?.length">
-                <div v-for="p in proposedInterventions.proposals"
-                     :key="p.intervention_id"
-                     class="proposal-card">
+                <!-- Sticky CTA: "Re-run with N selected · +$X.YM".
+                     Disabled when 0 proposals are picked OR a run is
+                     already in flight. The cost is the SUM of selected
+                     proposal cost_usd values (selectedCostTotal). -->
+                <div class="rerun-cta">
+                  <button
+                    type="button"
+                    class="rerun-button"
+                    :disabled="selectedInterventionIds.length === 0 || loading"
+                    @click="onRerunClick"
+                  >
+                    <PhPlay :size="13" weight="fill" />
+                    <span v-if="selectedInterventionIds.length === 0">
+                      Pick at least one proposal
+                    </span>
+                    <span v-else>
+                      Re-run with {{ selectedInterventionIds.length }} selected
+                      <span class="rerun-cost">· +${{ formatCurrency(selectedCostTotal) }}</span>
+                    </span>
+                  </button>
+                </div>
+                <button
+                  v-for="p in proposedInterventions.proposals"
+                  :key="p.intervention_id"
+                  :class="['proposal-card', { selected: selectedInterventionIds.includes(p.intervention_id) }]"
+                  :aria-pressed="selectedInterventionIds.includes(p.intervention_id)"
+                  type="button"
+                  @click="toggleProposal(p.intervention_id)"
+                >
                   <div class="prop-row">
+                    <span class="prop-check" aria-hidden="true">
+                      <PhCheck v-if="selectedInterventionIds.includes(p.intervention_id)" :size="14" weight="bold" />
+                    </span>
                     <span class="prop-name">{{ p.label }}</span>
                     <span class="prop-cost">${{ formatCurrency(p.cost_usd) }}</span>
                   </div>
                   <div class="prop-rationale">{{ p.rationale }}</div>
-                </div>
+                </button>
                 <p v-if="proposedInterventions.summary" class="proposals-summary">
                   {{ proposedInterventions.summary }}
                 </p>
               </div>
+              <!-- Phase 2a followup: scenarios with no intervention catalog
+                   (Pompeii/Joplin/Turkey/Atlantis) come back from the
+                   propose endpoint with model='none' and an honest summary
+                   string. The old copy "Gemma did not return proposals
+                   (fallback ranking shown)" was misleading there — surface
+                   the backend summary instead. -->
+              <div v-else-if="proposedInterventions?.model === 'none'" class="proposals-empty">
+                {{ proposedInterventions.summary || 'No interventions modelled for this scenario.' }}
+              </div>
               <div v-else class="proposals-empty">
                 Gemma did not return proposals (fallback ranking shown).
               </div>
+            </div>
+
+            <p class="events-cite">
+              <PhCpu :size="11" weight="duotone" color="var(--el-aether)" />
+              &nbsp;Monte Carlo · 90% CI · HAZUS-MH 2.1 · Gemma 4 e4b
+            </p>
+          </div>
+
+          <!-- ACT 5: Prevention Lab. Takes over the events panel once
+               the judge has selected 1+ proposals and the MC arms have
+               returned deltas. Shows a 2-col DeltaCard grid + a
+               "Previous: …" pill drawn from mcRunHistory[0], plus an
+               inline Re-run CTA so the loop is self-contained. -->
+          <div v-if="derivedAct === 5" class="events-act5">
+            <div class="events-header">
+              <PhFlask :size="14" weight="fill" color="var(--el-aether)" />
+              <span>Prevention Lab · {{ enrichedDeltas.length }} intervention{{ enrichedDeltas.length === 1 ? '' : 's' }}</span>
+            </div>
+
+            <div v-if="previousRunSummary" class="prev-pill">
+              Previous: {{ previousRunSummary.lives.toLocaleString() }} lives
+              <span v-if="previousRunSummary.cpls != null">at ${{ formatCurrency(previousRunSummary.cpls) }}/life</span>
+              — {{ previousRunSummary.label }}
+            </div>
+
+            <div class="act5-grid">
+              <DeltaCard
+                v-for="d in enrichedDeltas"
+                :key="d.intervention_id"
+                :delta="d"
+              />
+            </div>
+
+            <!-- Re-run CTA inline so the judge can iterate without
+                 scrolling back to the Outcome panel. -->
+            <div v-if="proposedInterventions?.proposals?.length" class="rerun-cta">
+              <button
+                type="button"
+                class="rerun-button"
+                :disabled="selectedInterventionIds.length === 0 || loading"
+                @click="onRerunClick"
+              >
+                <PhPlay :size="13" weight="fill" />
+                <span v-if="selectedInterventionIds.length === 0">
+                  Pick at least one proposal
+                </span>
+                <span v-else>
+                  Re-run with {{ selectedInterventionIds.length }} selected
+                  <span class="rerun-cost">· +${{ formatCurrency(selectedCostTotal) }}</span>
+                </span>
+              </button>
             </div>
 
             <p class="events-cite">
@@ -218,13 +310,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, shallowReactive, watch } from 'vue'
 import {
   PhArrowLeft,
   PhBuildings,
   PhChartLineUp,
+  PhCheck,
   PhCpu,
   PhFirstAidKit,
+  PhFlask,
   PhInfo,
   PhMoon,
   PhPause,
@@ -270,9 +364,21 @@ const currentAct = ref(0)
 // events-panel redesign, but shellRef is still kept for future use).
 const shellRef = ref(null)
 
-// Map replay timer — declared up here so onPauseRun can clear it
-// before startMapReplay() is defined later in the file.
-let _replayTimer = null
+// Per-scenario map replay timers. Each entry is
+//   { intervalId, runId }
+// keyed by scenario_id. This replaces the singleton _replayTimer so a
+// timer that started under one scenario can be cancelled or self-clear
+// when the user navigates to a different city (F1 — cross-city replay
+// leak). onPauseRun and startMapReplay both go through this Map.
+const _replayTimers = new Map()
+
+// Phase 2b — Per-scenario AbortControllers for in-flight MC runs. A new
+// Re-run on the same scenario aborts the prior request first so the
+// post-await `.then(...)` write doesn't race against the fresh run's
+// state. The controller is dropped from the map once the request
+// settles (try/finally in onRunMC). Same Map shape as _replayTimers
+// for symmetry. We keep it as a const Map (no reactivity needed).
+const _inflightControllers = new Map()
 
 // H4: theme — light by default per civic-tech convention; dark optional
 // for night-ops / low-light demos. Persists in localStorage and reflects
@@ -307,35 +413,199 @@ const reduceMotion = () =>
 // --- State ---
 const scenarios = ref([])
 const selectedScenarioId = ref('la-puente-hills-m72-ref')
-// Interventions: long-term plan is post-sim Gemma proposal (M6'
-// Prevention Lab). For the current demo we seed three high-leverage
-// LA-D03 interventions so the first START fires with non-zero deltas
-// and the Result drawer shows real lives_saved/dollars_saved numbers.
-// When the case is non-LA, the backend MC simply ignores intervention
-// IDs that don't apply (no error) so this is safe across scenarios.
 const interventions = ref([])
-const selectedInterventionIds = ref([
-  'preposition_d03_4amb',
-  'evac_d03_30min_early',
-  'retrofit_d03_w1',
-])
-const nTrials = ref(8)
-const nPopulation = ref(80)
-const durationHours = ref(24)
-// Gemma 4 is always on. Set during onMounted from `?gemma=off` URL param
-// only as an emergency fallback; the toggle is no longer in the UI.
-const useLLM = ref(true)
 const loading = ref(false)
 const errorMsg = ref('')
 
-const mcRun = ref(null)
-const streamRunId = ref(null)
-const runState = ref('idle') // idle | running | done
-const recentDecisions = ref([])
+// Phase 1 — Per-scenario state preservation.
+// Every Monte Carlo run, intervention selection, animation step, and
+// loaded scenario blob lives in its OWN entry inside `scenarioStates`,
+// keyed by scenario_id. Switching cities just changes which entry the
+// computed getters below read from — prior runs stay intact. The map
+// is `shallowReactive` so MC payload arrays (huge per-trial timelines)
+// don't trigger deep proxy traversal every SchematicMap re-render.
+const scenarioStates = shallowReactive({})
 
-// M2: holds the full loaded scenario object (buildings, districts, facilities)
-// populated by onLoadScenario; drives <SchematicMap>.
-const loadedScenario = ref(null)
+// `?gemma=full` URL flag sets this; new scenarios created later inherit
+// it as their default useLLM. Existing scenarios already in the map get
+// the flag retroactively when applyActFromUrl parses it.
+const _globalUseLLM = ref(false)
+
+function initScenarioState(id) {
+  if (!id) return
+  // Cap at 6 entries to bound memory across long demo sessions.
+  if (Object.keys(scenarioStates).length >= 6 && !scenarioStates[id]) {
+    console.warn('Aurora: scenarioStates at cap (6); cannot init', id)
+    return
+  }
+  if (scenarioStates[id]) return
+  scenarioStates[id] = {
+    mcRun: null,
+    streamRunId: null,
+    runState: 'idle',
+    recentDecisions: [],
+    selectedInterventionIds: [],
+    proposedInterventions: null,
+    animationHour: 0,
+    nTrials: 8,
+    nPopulation: 80,
+    durationHours: 24,
+    lastRunAt: null,
+    useLLM: _globalUseLLM.value,
+    loadedScenario: null,
+    // Reserved for Phase 2b — keep []
+    mcRunHistory: [],
+  }
+}
+
+function setForCurrent(field, value) {
+  const id = selectedScenarioId.value
+  if (!id) return
+  if (!scenarioStates[id]) initScenarioState(id)
+  // Guard against the cap-refused case.
+  if (!scenarioStates[id]) return
+  // CRITICAL: shallowReactive only tracks top-level key writes. Mutating
+  // an inner property (scenarioStates[id].field = value) reads as a dep
+  // on the [id] key but never invalidates the computed cache, leaving
+  // the UI frozen on same-scenario state changes. Replace the entry
+  // object atomically so the top-level write fires reactivity.
+  scenarioStates[id] = { ...scenarioStates[id], [field]: value }
+}
+
+// setForId: same atomic-replace semantics as setForCurrent, but writes
+// to an explicit scenario id rather than the current selection. Used by
+// async paths (onLoadScenario, fetchProposals) that capture the target
+// id at call time so a mid-flight scenario switch doesn't cross-write.
+function setForId(id, field, value) {
+  if (!id) return
+  if (!scenarioStates[id]) return
+  scenarioStates[id] = { ...scenarioStates[id], [field]: value }
+}
+
+// Eagerly seed the default scenario so first-paint reads return defaults
+// instead of `undefined`.
+initScenarioState(selectedScenarioId.value)
+
+// --- Per-scenario computed getters ----------------------------------------
+// Reads go through scenarioStates[selectedScenarioId.value]. For getters
+// that the template writes back via .value = X (mcRun/runState/...), we
+// use writable computeds that mutate the current scenario's entry. For
+// v-model.number bindings (nTrials/nPopulation/durationHours) we also
+// need writable computeds so the input change updates per-scenario state.
+//
+// For selectedInterventionIds: returning the underlying array reference
+// is fine because the array lives inside a shallowReactive — push/splice
+// on it triggers the parent re-render via the shallowReactive proxy.
+function _cur() {
+  const id = selectedScenarioId.value
+  return id ? scenarioStates[id] : null
+}
+
+const mcRun = computed({
+  get: () => _cur()?.mcRun ?? null,
+  set: (v) => setForCurrent('mcRun', v),
+})
+const streamRunId = computed({
+  get: () => _cur()?.streamRunId ?? null,
+  set: (v) => setForCurrent('streamRunId', v),
+})
+const runState = computed({
+  get: () => _cur()?.runState ?? 'idle',
+  set: (v) => setForCurrent('runState', v),
+})
+const recentDecisions = computed({
+  get: () => _cur()?.recentDecisions ?? [],
+  set: (v) => setForCurrent('recentDecisions', v),
+})
+const selectedInterventionIds = computed({
+  get: () => _cur()?.selectedInterventionIds ?? [],
+  set: (v) => setForCurrent('selectedInterventionIds', v),
+})
+const proposedInterventions = computed({
+  get: () => _cur()?.proposedInterventions ?? null,
+  set: (v) => setForCurrent('proposedInterventions', v),
+})
+const loadedScenario = computed({
+  get: () => _cur()?.loadedScenario ?? null,
+  set: (v) => setForCurrent('loadedScenario', v),
+})
+const animationHour = computed({
+  get: () => _cur()?.animationHour ?? 0,
+  set: (v) => setForCurrent('animationHour', v),
+})
+const nTrials = computed({
+  get: () => _cur()?.nTrials ?? 8,
+  set: (v) => setForCurrent('nTrials', v),
+})
+const nPopulation = computed({
+  get: () => _cur()?.nPopulation ?? 80,
+  set: (v) => setForCurrent('nPopulation', v),
+})
+const durationHours = computed({
+  get: () => _cur()?.durationHours ?? 24,
+  set: (v) => setForCurrent('durationHours', v),
+})
+// useLLM falls back to the URL-flagged default for scenarios that haven't
+// been initialised yet (computed getters can be hit before init for
+// brand-new ids). Once an entry exists, its own value wins.
+const useLLM = computed({
+  get: () => {
+    const cur = _cur()
+    return cur ? cur.useLLM : _globalUseLLM.value
+  },
+  set: (v) => setForCurrent('useLLM', v),
+})
+
+// === PHASE 2B INSERTS COMPUTEDS HERE ===
+// e.g. currentAct, mcRunHistory views, etc.
+//
+// derivedAct: the topbar pill display value for Acts 2..5. `currentAct`
+// (the ref) still owns Acts 0 and 1 (brand + city pick) — those are the
+// raw-route screens. For 2..5 we DERIVE the act from runState + mcRun +
+// selectedInterventionIds so the pill ticks through Briefing → Live →
+// Outcome → Prevention Lab without anyone having to call goToAct.
+//
+// Transitions (Acts 2..5 only):
+//   2 — briefing default; nothing has run yet
+//   3 — runState === 'running' (live MC + agent feed)
+//   4 — done + 0 selected interventions (Outcome hero + proposal cards)
+//   5 — done + 1+ selected + deltas present (Prevention Lab grid)
+const derivedAct = computed(() => {
+  if (currentAct.value < 2) return currentAct.value
+  if (runState.value === 'running') return 3
+  if (mcRun.value && runState.value === 'done') {
+    if (
+      selectedInterventionIds.value.length > 0 &&
+      mcRun.value.deltas?.length > 0
+    ) {
+      return 5
+    }
+    return 4
+  }
+  return 2
+})
+
+// Total $ cost of the proposals currently selected. Drives the
+// "Re-run with N selected · +$X.YM" CTA label. Returns 0 when there are
+// no proposals OR no selection so callers can safely format without
+// branching on null.
+const selectedCostTotal = computed(() => {
+  const props = proposedInterventions.value?.proposals ?? []
+  return selectedInterventionIds.value.reduce((sum, id) => {
+    const p = props.find((x) => x.intervention_id === id)
+    return sum + (p?.cost_usd ?? 0)
+  }, 0)
+})
+
+// "Previous: …" pill drawn above the Act 5 DeltaCard grid. Pulls the
+// most recent entry from this scenario's mcRunHistory (FIFO-capped to 3
+// by the push in onRunMC). Null until at least one Re-run has fired.
+const previousRunSummary = computed(() => {
+  const id = selectedScenarioId.value
+  if (!id) return null
+  const hist = scenarioStates[id]?.mcRunHistory ?? []
+  return hist.length > 0 ? hist[0] : null
+})
 
 // Detect Ollama-not-running so we can offer the "Try without Gemma 4" path.
 const ollamaError = computed(() => {
@@ -593,7 +863,9 @@ async function loadIndex() {
 }
 
 async function onLoadScenario() {
-  if (!selectedScenarioId.value) return
+  const targetId = selectedScenarioId.value
+  if (!targetId) return
+  if (!scenarioStates[targetId]) initScenarioState(targetId)
   loading.value = true
   errorMsg.value = ''
   try {
@@ -601,9 +873,14 @@ async function onLoadScenario() {
     // populate the schematic map. The legacy /load route is Neo4j-backed
     // for graph-tools persistence — not needed for the map. Decoupling
     // means the demo runs even when Docker / Neo4j aren't up.
-    const resp = await auroraApi.previewScenario(selectedScenarioId.value)
+    const resp = await auroraApi.previewScenario(targetId)
     // resp is the {success, data} envelope; resp.data is the scenario.
-    if (resp?.data) loadedScenario.value = resp.data
+    // Write to the captured target id's entry (not the now-current one)
+    // so mid-flight scenario switches don't cross-write. Use atomic
+    // entry replacement so shallowReactive fires the computed deps.
+    if (resp?.data && scenarioStates[targetId]) {
+      setForId(targetId, 'loadedScenario', resp.data)
+    }
     await loadIndex()
   } catch (e) {
     errorMsg.value = `Load failed: ${e.message}`
@@ -613,43 +890,134 @@ async function onLoadScenario() {
 }
 
 // M2.1: auto-preview on scenario selection — no need for a "Refresh DB"
-// click. The map appears as soon as the user picks a scenario.
+// click. The map appears as soon as the user picks a scenario. Phase 1
+// adds a per-scenario init + a "skip if already loaded" guard so flipping
+// back to a city the user already visited is instant.
 watch(selectedScenarioId, async (newId) => {
   if (!newId) return
-  // The earlier watcher clears loadedScenario; this kicks off a fresh preview.
-  await onLoadScenario()
+  if (!scenarioStates[newId]) initScenarioState(newId)
+  if (!scenarioStates[newId]?.loadedScenario) {
+    await onLoadScenario()
+  }
 })
 
 function toggleIntervention(id) {
-  const idx = selectedInterventionIds.value.indexOf(id)
-  if (idx === -1) selectedInterventionIds.value.push(id)
-  else selectedInterventionIds.value.splice(idx, 1)
+  // selectedInterventionIds is a computed backed by
+  // scenarioStates[currentId].selectedInterventionIds. shallowReactive
+  // does NOT track inner-property mutations, so push/splice on the
+  // returned array reference would never invalidate the computed.
+  // Replace the array with a new one via setForCurrent so the entry
+  // object is re-assigned at the top level (the reactivity boundary).
+  const list = selectedInterventionIds.value
+  const idx = list.indexOf(id)
+  const next = idx === -1
+    ? [...list, id]
+    : [...list.slice(0, idx), ...list.slice(idx + 1)]
+  setForCurrent('selectedInterventionIds', next)
+}
+
+// Phase 2b — proposal-card click handler. Identical semantics to
+// toggleIntervention (atomic-replace selectedInterventionIds via
+// setForCurrent so shallowReactive fires the per-scenario computed).
+// Kept as a named alias rather than inlining toggleIntervention in the
+// template so the click path reads "toggleProposal(id)" — matches the
+// surface verb the judge sees in the Outcome panel.
+function toggleProposal(id) {
+  toggleIntervention(id)
+}
+
+// Phase 2b — Re-run CTA click handler. The button's `disabled` attribute
+// blocks normal UA clicks, but accessibility paths (e.g. keyboard
+// dispatch or assistive tech) can still fire the event. This JS-level
+// gate is the source of truth: only call onRunMC when at least one
+// proposal is selected. (The first/baseline run uses the topbar Start
+// button which doesn't go through this gate.)
+function onRerunClick() {
+  if (selectedInterventionIds.value.length === 0) return
+  onRunMC()
 }
 
 async function onRunMC() {
   if (loading.value || !canRun.value) return
+
+  const sid = selectedScenarioId.value
+
+  // Phase 2b — Abort any prior in-flight MC POST on this scenario so
+  // its post-await write can't race the fresh run. The axios call
+  // settles either way (we surface AbortError as a benign no-op below);
+  // the backend still owns the actual run lifecycle via streamRunId.
+  if (_inflightControllers.has(sid)) {
+    _inflightControllers.get(sid).abort()
+  }
+  const controller = new AbortController()
+  _inflightControllers.set(sid, controller)
+
   loading.value = true
   errorMsg.value = ''
-  mcRun.value = null
-  proposedInterventions.value = null
-  recentDecisions.value = []
-  runState.value = 'running'
-  // Events panel auto-shows the running state via runState reactivity.
   try {
-    const resp = await auroraApi.runMCStreaming(selectedScenarioId.value, {
+    // Phase 2a followup — fire the POST FIRST so an idempotent backend
+    // response ({status: 'already_running'}) is observable before we
+    // wipe local state. The backend is fast (~tens of ms cached); only
+    // when it confirms a fresh `started` run do we clear the panel.
+    const resp = await auroraApi.runMCStreaming(sid, {
       intervention_ids: selectedInterventionIds.value,
       n_trials: nTrials.value,
       duration_hours: durationHours.value,
       n_population_agents: nPopulation.value,
       use_llm: useLLM.value,
     })
+
+    // Idempotent rejoin: same in-flight run, no state changes.
+    if (resp.data?.status === 'already_running') {
+      streamRunId.value = resp.data.run_id
+      return
+    }
+
+    // Real new run — snapshot previous best into mcRunHistory BEFORE
+    // wiping. The Act 5 "Previous: …" pill reads this; FIFO cap of 3
+    // keeps history bounded without a TTL sweep. We compute the
+    // snapshot via enrichedDeltas to reuse its ci/dollar flattening.
+    if (mcRun.value && mcRun.value.deltas?.length > 0) {
+      const cur = scenarioStates[sid] ?? {}
+      const best = enrichedDeltas.value.length
+        ? [...enrichedDeltas.value].sort(
+            (a, b) => b.lives_saved_mean - a.lives_saved_mean,
+          )[0]
+        : null
+      const newHistory = [
+        {
+          at: Date.now(),
+          lives: best ? Math.round(best.lives_saved_mean) : 0,
+          cpls: best?.dollars_per_life ?? null,
+          label: best?.label ?? '—',
+          ids: [...selectedInterventionIds.value],
+        },
+        ...(cur.mcRunHistory ?? []),
+      ].slice(0, 3)
+      setForId(sid, 'mcRunHistory', newHistory)
+    }
+
+    // Wipe panel state and flip to 'running' — MCProgressPanel polls
+    // /progress and emits `progress`/`done` from here.
+    mcRun.value = null
+    proposedInterventions.value = null
+    recentDecisions.value = []
+    runState.value = 'running'
     streamRunId.value = resp.data.run_id
-    // From here MCProgressPanel polls /progress and emits `progress`/`done`.
   } catch (e) {
+    // Aborted by a superseding Re-run on the same scenario — benign.
+    if (e?.name === 'AbortError' || e?.name === 'CanceledError') {
+      return
+    }
     errorMsg.value = `MC run failed: ${e.message}`
     runState.value = 'idle'
   } finally {
     loading.value = false
+    // Drop the controller IFF it's still the one we registered (a newer
+    // run on this scenario may have already overwritten it).
+    if (_inflightControllers.get(sid) === controller) {
+      _inflightControllers.delete(sid)
+    }
   }
 }
 
@@ -676,9 +1044,18 @@ async function onStreamDone(result) {
  * progress poller. The backend MC keeps running (typical case: it's
  * already finished from cache anyway), but the user sees the UI
  * stop animating and the events panel goes back to idle.
+ *
+ * Phase 1: only clears the timer for the CURRENT scenario so pausing
+ * in city A doesn't kill an animation that was already running in
+ * city B (or that the user paused-then-navigated-back-to).
  */
 function onPauseRun() {
-  if (_replayTimer) { clearInterval(_replayTimer); _replayTimer = null }
+  const id = selectedScenarioId.value
+  const t = _replayTimers.get(id)
+  if (t) {
+    clearInterval(t.intervalId)
+    _replayTimers.delete(id)
+  }
   // Mark the run as done if we have data, otherwise reset to idle.
   if (mcRun.value) {
     runState.value = 'done'
@@ -690,32 +1067,56 @@ function onPauseRun() {
 
 // --- Map replay: animate `animationHour` from 0..duration_hours over
 // ~12 wall-seconds so the SchematicMap can render per-hour district
-// damage progression. Reads from the baseline timeline.
-// (_replayTimer is declared at the top of the script so onPauseRun
-// can reach it.)
-const animationHour = ref(0)
+// damage progression. Reads from the baseline timeline. Each interval
+// is tagged with the scenario_id and the streamRunId that started it,
+// so a tick fires on a city the user has since navigated away from
+// (or that another run started under) will self-clear.
 function startMapReplay() {
-  if (_replayTimer) clearInterval(_replayTimer)
+  const id = selectedScenarioId.value
+  if (!id) return
+  if (!scenarioStates[id]) initScenarioState(id)
+  // The token: prefer the in-flight streamRunId; fall back to a synthetic
+  // `done-…` token when the run already completed and we're just animating.
+  const runToken = scenarioStates[id]?.streamRunId ?? `done-${Date.now()}`
+  // Cancel any prior timer on this scenario before starting a new one.
+  const prior = _replayTimers.get(id)
+  if (prior) clearInterval(prior.intervalId)
+
   const dur = mcRun.value?.duration_hours ?? 24
   const wallSecondsTotal = 12 // ~half the v3-plan target; tight & legible
   const tick = (wallSecondsTotal * 1000) / dur
   let h = 0
-  animationHour.value = 0
-  _replayTimer = setInterval(() => {
+  // Atomic-replace reset so SchematicMap re-renders to hour 0.
+  if (scenarioStates[id]) setForId(id, 'animationHour', 0)
+
+  const intervalId = setInterval(() => {
+    const cur = scenarioStates[id]
+    // Self-clear if the entry vanished or another run took over.
+    if (!cur || (cur.streamRunId !== runToken && !runToken.startsWith('done-'))) {
+      clearInterval(intervalId)
+      _replayTimers.delete(id)
+      return
+    }
     h += 1
-    animationHour.value = h
+    // Atomic replace so SchematicMap (and any other animationHour-derived
+    // computed) re-evaluates each tick. Direct `cur.animationHour = h`
+    // would be a shallowReactive-invisible inner mutation — UI freezes.
+    setForId(id, 'animationHour', h)
     if (h >= dur) {
-      clearInterval(_replayTimer)
-      _replayTimer = null
+      clearInterval(intervalId)
+      _replayTimers.delete(id)
     }
   }, tick)
+  _replayTimers.set(id, { intervalId, runId: runToken })
 }
 
 // --- Gemma intervention proposals (fired on done) ---
-const proposedInterventions = ref(null)  // {proposals, summary, model, generated_at}
 const proposingNow = ref(false)
 async function fetchProposals(result) {
   if (!result?.baseline) return
+  const targetId = selectedScenarioId.value
+  if (!targetId) return
+  if (!scenarioStates[targetId]) initScenarioState(targetId)
   proposingNow.value = true
   try {
     const baseline = {
@@ -727,14 +1128,22 @@ async function fetchProposals(result) {
       // so leave it empty — the backend handles missing district data.
       deaths_by_district: {},
     }
-    const resp = await auroraApi.proposeInterventions(
-      selectedScenarioId.value, baseline, 4,
-    )
-    proposedInterventions.value = resp.data
+    const resp = await auroraApi.proposeInterventions(targetId, baseline, 4)
+    // Write back to the captured target scenario — the user may have
+    // navigated away while Gemma was thinking. Atomic replace so the
+    // proposedInterventions computed fires for whichever scenario is
+    // currently selected (if it matches targetId).
+    if (scenarioStates[targetId]) {
+      setForId(targetId, 'proposedInterventions', resp.data)
+    }
   } catch (e) {
     // Non-fatal — Result drawer just doesn't show proposals.
     console.warn('proposeInterventions failed', e)
-    proposedInterventions.value = { proposals: [], summary: '', model: 'unavailable' }
+    if (scenarioStates[targetId]) {
+      setForId(targetId, 'proposedInterventions', {
+        proposals: [], summary: '', model: 'unavailable',
+      })
+    }
   } finally {
     proposingNow.value = false
   }
@@ -772,14 +1181,11 @@ function animateResultReveal() {
   })
 }
 
-// Auto-reset run state if user changes scenario / interventions after a run.
-watch([selectedScenarioId, selectedInterventionIds], () => {
-  if (runState.value === 'done') {
-    // Keep the result visible but allow a fresh run.
-    runState.value = 'idle'
-  }
-})
-
+// Phase 1: the previous `watch([selectedScenarioId, selectedInterventionIds])`
+// that forced runState back to 'idle' on any change is no longer needed —
+// each scenario carries its own runState in scenarioStates, so switching
+// cities naturally reveals whatever state THAT city last had.
+//
 // (M2.1 collapsed: the auto-preview watch above replaces both the
 // stale-clear and the explicit "Refresh DB" click. Picking a scenario
 // = loading its preview into the map immediately.)
@@ -790,13 +1196,27 @@ async function applyDemoSeed() {
   if (typeof window === 'undefined') return
   const params = new URLSearchParams(window.location.search)
   if (params.get('seed') !== 'demo') return
-  selectedScenarioId.value = 'la-puente-hills-m72-ref'
-  selectedInterventionIds.value = []
-  nTrials.value = 20
-  nPopulation.value = 80
-  durationHours.value = 24
+  const id = 'la-puente-hills-m72-ref'
+  if (!scenarioStates[id]) initScenarioState(id)
+  // Demo-tuned MC params for the seeded scenario. Single atomic-replace
+  // so the four writes batch into one reactivity invalidation rather
+  // than four direct inner-property mutations (which shallowReactive
+  // would not see at all).
+  if (scenarioStates[id]) {
+    scenarioStates[id] = {
+      ...scenarioStates[id],
+      selectedInterventionIds: [],
+      nTrials: 20,
+      nPopulation: 80,
+      durationHours: 24,
+    }
+  }
+  selectedScenarioId.value = id
   currentAct.value = 2  // demo skips brand + city pick
   await loadIndex()
+  // Force the preview explicitly — if `id` was already the default,
+  // assigning it to selectedScenarioId.value is a no-op for the watch.
+  await onLoadScenario()
   setTimeout(() => {
     if (canRun.value && runState.value === 'idle') onRunMC()
   }, 1000)
@@ -846,6 +1266,7 @@ watch(currentAct, (n) => {
 }, { immediate: false })
 
 // Apply ?act=N from URL on cold load (precursor to M7' full URL driver).
+// `?gemma=full` opts into per-cell Gemma decisions inside MC trials (slow);
 // `?gemma=off` is the emergency fallback when Ollama is down at demo time.
 function applyActFromUrl() {
   if (typeof window === 'undefined') return
@@ -854,8 +1275,22 @@ function applyActFromUrl() {
   if (Number.isFinite(a) && a >= 0 && a <= 5) {
     currentAct.value = a
   }
-  if (params.get('gemma') === 'off') {
-    useLLM.value = false
+  // ?gemma flag flips _globalUseLLM (the default for any future entries
+  // initialised by initScenarioState) AND propagates onto every existing
+  // entry so the user immediately sees the change everywhere they've
+  // already been.
+  const gem = params.get('gemma')
+  if (gem === 'full' || gem === 'off') {
+    const v = gem === 'full'
+    _globalUseLLM.value = v
+    // Atomic entry replacement per key so the useLLM computed fires for
+    // whichever scenario is currently selected. Direct
+    // `scenarioStates[k].useLLM = v` would be invisible to
+    // shallowReactive and leave the UI showing the wrong gemma toggle
+    // state.
+    for (const k of Object.keys(scenarioStates)) {
+      setForId(k, 'useLLM', v)
+    }
   }
 }
 
@@ -1386,11 +1821,76 @@ onMounted(async () => {
   border-radius: 8px;
 }
 .proposal-card {
+  /* Phase 2b: proposal-card is now a <button> so the judge can toggle
+     selection. The visual shell is unchanged; only the button-reset and
+     selected-state styling is new. */
+  appearance: none;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: var(--sp-3);
   margin-bottom: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  color: inherit;
+  font: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.proposal-card:hover { background: var(--bg-1); border-color: var(--ink-2); }
+.proposal-card:focus-visible {
+  outline: 2px solid var(--el-aether);
+  outline-offset: 2px;
+}
+.proposal-card.selected {
+  border-color: var(--el-aether);
+  background: color-mix(in srgb, var(--el-aether) 8%, var(--bg-2));
+}
+.prop-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  color: var(--el-aether);
+}
+.rerun-cta {
+  margin: 0 0 var(--sp-3);
+}
+.rerun-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--el-air);
+  color: var(--bg-0);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.35), 0 4px 14px -6px rgba(138, 201, 38, 0.5);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.rerun-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(138, 201, 38, 0.5), 0 8px 20px -6px rgba(138, 201, 38, 0.65);
+}
+.rerun-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.rerun-cost {
+  font-weight: 600;
+  opacity: 0.9;
 }
 .prop-row {
   display: flex;
@@ -1428,6 +1928,35 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--ink-2);
   font-style: italic;
+}
+
+/* Phase 2b — Act 5 Prevention Lab section in the events panel. */
+.events-act5 {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.act5-grid {
+  display: grid;
+  /* Wide events-panel (>~580px viewport on the right pane) renders
+     2 columns; narrow stacks to 1. */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+.prev-pill {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px var(--sp-3);
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kv-list {

@@ -188,6 +188,19 @@ def _run_intervention_trials(
     cache_hits_start = cache.stats.hits
     cache_misses_start = cache.stats.misses
 
+    # Optional per-trial pacing for the streaming demo. Synth-only trials
+    # finish in ~6 ms each; the agent feed + progress bars would never
+    # actually show. Set AURORA_MC_TRIAL_DELAY_MS (env) to slow things to a
+    # visible cadence — only applied when a progress_callback is wired up,
+    # so direct unit-test calls keep their fast path.
+    import os as _os
+    trial_delay_s = 0.0
+    if progress_callback is not None:
+        try:
+            trial_delay_s = max(0.0, float(_os.environ.get("AURORA_MC_TRIAL_DELAY_MS", "350"))) / 1000.0
+        except ValueError:
+            trial_delay_s = 0.35
+
     for i in range(n_trials):
         t = run_trial(
             mutated,
@@ -215,6 +228,11 @@ def _run_intervention_trials(
                 n_trials,
                 running_mean,
             )
+            if trial_delay_s and i < n_trials - 1:
+                # Cinematic pause between trials so the live feed +
+                # progress bars actually animate. Skipped after the last
+                # trial — no reason to delay the final result.
+                time.sleep(trial_delay_s)
 
     deaths = [t.deaths for t in trials]
     injuries = [t.injuries for t in trials]
@@ -317,10 +335,14 @@ def _delta_for_intervention(
 
     # Compute cost_per_life_saved_usd when the intervention carries cost data
     # and the mean lives-saved estimate is positive (avoid division-by-zero /
-    # nonsensical negative CPL).
+    # nonsensical negative CPL). math.isfinite() is a defence-in-depth net
+    # so we never emit a literal Infinity to JSON (DeltaCard treats None
+    # gracefully).
     cost_per_life: float | None = None
     if lives.point > 0:
         cost_per_life = round(intervention.cost_usd / lives.point, 2)
+    if cost_per_life is not None and not math.isfinite(cost_per_life):
+        cost_per_life = None
 
     return InterventionDelta(
         intervention_id=treated.intervention_id,

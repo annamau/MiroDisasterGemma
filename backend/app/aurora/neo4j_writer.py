@@ -170,20 +170,23 @@ def delete_scenario(driver, scenario_id: str) -> int:
 
 
 def get_scenario_summary(driver, scenario_id: str) -> dict[str, Any] | None:
-    """Read-back scenario stats for the API."""
+    """Read-back scenario stats for the API.
+
+    Uses CALL { ... } subqueries to avoid cartesian-product explosion when
+    multiple scenarios are loaded — the prior OPTIONAL MATCH chain multiplied
+    Buildings × Districts × Hospitals × FireStations × Shelters and could
+    pin the query for tens of seconds with 1k+ buildings per scenario.
+    """
     with driver.session() as s:
         rec = s.run(
             """
             MATCH (sc:Scenario {scenario_id: $sid})
-            OPTIONAL MATCH (b:Building {scenario_id: $sid})
-            OPTIONAL MATCH (dt:District {scenario_id: $sid})
-            OPTIONAL MATCH (h:Hospital {scenario_id: $sid})
-            OPTIONAL MATCH (f:FireStation {scenario_id: $sid})
-            OPTIONAL MATCH (sh:Shelter {scenario_id: $sid})
-            RETURN sc{.*} AS scenario,
-                   count(DISTINCT b) AS bldg, count(DISTINCT dt) AS dst,
-                   count(DISTINCT h) AS hsp, count(DISTINCT f) AS fst,
-                   count(DISTINCT sh) AS shl
+            CALL { WITH sc MATCH (b:Building {scenario_id: sc.scenario_id})       RETURN count(b)  AS bldg }
+            CALL { WITH sc MATCH (dt:District {scenario_id: sc.scenario_id})      RETURN count(dt) AS dst  }
+            CALL { WITH sc MATCH (h:Hospital {scenario_id: sc.scenario_id})       RETURN count(h)  AS hsp  }
+            CALL { WITH sc MATCH (f:FireStation {scenario_id: sc.scenario_id})    RETURN count(f)  AS fst  }
+            CALL { WITH sc MATCH (sh:Shelter {scenario_id: sc.scenario_id})       RETURN count(sh) AS shl  }
+            RETURN sc{.*} AS scenario, bldg, dst, hsp, fst, shl
             """,
             sid=scenario_id,
         ).single()

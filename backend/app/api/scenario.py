@@ -28,6 +28,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from ..config import Config
 from ..aurora.decision_cache import get_default_cache
 from ..aurora.hazus_fragility import (
     estimate_building_loss, shaking_intensity_to_sa,
@@ -65,6 +66,43 @@ REFERENCE_BUILDERS = {
     "turkey-syria-m78-2023":    build_turkey_syria_m78_2023,
     "atlantis":                 build_atlantis,
 }
+
+
+# Scenario-id → tuple of intervention_id prefixes that apply to that city.
+# Pompeii/Joplin/Turkey/Atlantis have no scenario-specific interventions
+# modelled yet — propose returns an empty list with an honest summary
+# instead of forcing an LA fallback (which would yield deaths_saved=0
+# across the board, the demo-killer flagged in the red-team review).
+_SCENARIO_INTERVENTION_PREFIXES: dict[str, tuple[str, ...]] = {
+    "la-puente-hills-m72-ref": (
+        "preposition_d03_", "evac_d03_", "retrofit_d0",
+        "prebunk_misinfo", "fire_break_",
+    ),
+    "valencia-dana-2024": ("vlc_",),
+}
+
+
+def _filter_catalog_for_scenario(scenario_id: str) -> list[dict[str, Any]]:
+    """Return only the intervention catalog entries that apply to this scenario.
+
+    Empty list = no catalog for this scenario yet (honest empty, NOT a
+    silent LA fallback).
+    """
+    prefixes = _SCENARIO_INTERVENTION_PREFIXES.get(scenario_id, ())
+    out: list[dict[str, Any]] = []
+    if not prefixes:
+        return out
+    for iid, iv in PRESET_INTERVENTIONS.items():
+        if iid == "baseline":
+            continue
+        if iid.startswith(prefixes):
+            out.append({
+                "id": iid,
+                "kind": iv.kind,
+                "label": iv.label,
+                "cost_usd": iv.cost_usd,
+            })
+    return out
 
 # ---------------------------------------------------------------------------
 # Streaming Monte Carlo progress store
@@ -130,14 +168,59 @@ _ARCHETYPE_TEMPLATES: dict[str, list[str]] = {
 
 _DISTRICT_IDS = ["LA-D01", "LA-D02", "LA-D03", "LA-D04", "LA-D05", "LA-D06", "LA-D07", "LA-D08"]
 
+# Named "agents" pinned to each archetype so the decision feed reads like a
+# real crowd — a Twitter/Mastodon-style timeline with avatars and handles.
+# Names are intentionally diverse but generic; not real people. Avatar uses
+# the deterministic DiceBear "thumbs" set so initials map stably to a face.
+_ARCHETYPE_PEOPLE: dict[str, list[dict[str, str]]] = {
+    "eyewitness": [
+        {"name": "Maya Rivera",    "handle": "@maya_r",       "role": "Eyewitness"},
+        {"name": "Devon Park",     "handle": "@devpark",      "role": "Eyewitness"},
+        {"name": "Aisha Brooks",   "handle": "@aishab",       "role": "Eyewitness"},
+        {"name": "Theo Nakamura",  "handle": "@theo_nak",     "role": "Eyewitness"},
+    ],
+    "helper": [
+        {"name": "Carlos Mendez",  "handle": "@carlos_m",     "role": "Volunteer"},
+        {"name": "Priya Shah",     "handle": "@priya_s",      "role": "Volunteer"},
+        {"name": "Jordan Wells",   "handle": "@jwells",       "role": "Mutual aid"},
+        {"name": "Sofia Russo",    "handle": "@sofiar",       "role": "Volunteer"},
+    ],
+    "amplifier": [
+        {"name": "LA Pulse",       "handle": "@lapulse_news", "role": "Local news"},
+        {"name": "Kenji Watts",    "handle": "@kenjiw",       "role": "Reporter"},
+        {"name": "Crisis Watch",   "handle": "@crisis_la",    "role": "Aggregator"},
+        {"name": "Nora Singh",     "handle": "@noras",        "role": "Journalist"},
+    ],
+    "authority": [
+        {"name": "Chief R. Alvarez","handle": "@LAFD_ops",    "role": "LAFD Ops"},
+        {"name": "Mayor's Office", "handle": "@LAMayor",      "role": "City"},
+        {"name": "USAR Cmd",       "handle": "@USAR_CA8",     "role": "USAR"},
+        {"name": "Lt. M. Chen",    "handle": "@lapd_chen",    "role": "LAPD"},
+    ],
+    "vulnerable": [
+        {"name": "Eleanor (78)",   "handle": "@elliegram",    "role": "Senior"},
+        {"name": "Marcus T.",      "handle": "@mtee",         "role": "Wheelchair user"},
+        {"name": "Linh Tran",      "handle": "@linhfam",      "role": "Parent of 2"},
+        {"name": "Ramon Diaz",     "handle": "@ramon_d",      "role": "Diabetes / insulin"},
+    ],
+}
+
 
 def _get_synthetic_decision(arm_id: str, trial_idx: int, rng: Any) -> dict[str, Any]:
-    """Generate one plausible-looking agent decision for the log ticker."""
+    """Generate one plausible-looking agent decision for the log ticker.
+
+    Each decision is attributed to a named character so the feed reads like
+    a real social timeline with avatars + handles, not anonymized chips.
+    """
     archetype = rng.choice(list(_ARCHETYPE_TEMPLATES.keys()))
     template = rng.choice(_ARCHETYPE_TEMPLATES[archetype])
+    person = rng.choice(_ARCHETYPE_PEOPLE[archetype])
     district = rng.choice(_DISTRICT_IDS)
     hour = trial_idx % 24
     minute = (trial_idx * 7) % 60
+    # Stable avatar seed from the handle — the frontend renders this via
+    # DiceBear so the same person always gets the same face.
+    avatar_seed = person["handle"].lstrip("@")
     return {
         "archetype": archetype,
         "district_id": district,
@@ -145,6 +228,10 @@ def _get_synthetic_decision(arm_id: str, trial_idx: int, rng: Any) -> dict[str, 
         "minute": minute,
         "post_text": template,
         "timestamp": time.time(),
+        "agent_name": person["name"],
+        "agent_handle": person["handle"],
+        "agent_role": person["role"],
+        "avatar_seed": avatar_seed,
     }
 
 
@@ -498,15 +585,19 @@ def propose_interventions(scenario_id: str):
 
     # Build the prompt context — keep it tight; Gemma 4 e4b at 128K is fine
     # but the response speed matters for the live demo.
-    catalog = []
-    for iid, iv in PRESET_INTERVENTIONS.items():
-        if iid == "baseline":
-            continue
-        catalog.append({
-            "id": iid,
-            "kind": iv.kind,
-            "label": iv.label,
-            "cost_usd": iv.cost_usd,
+    # Filter the catalog to interventions scoped to THIS scenario's city.
+    # Scenarios without a modelled catalog get an honest empty response,
+    # not a silent LA fallback (deaths_saved=0 would be the result).
+    catalog = _filter_catalog_for_scenario(scenario_id)
+    if not catalog:
+        return jsonify({
+            "success": True,
+            "data": {
+                "proposals": [],
+                "summary": "No interventions modelled for this scenario yet.",
+                "model": "none",
+                "generated_at": int(time.time()),
+            },
         })
 
     top_districts = sorted(
@@ -548,8 +639,10 @@ def propose_interventions(scenario_id: str):
     try:
         from ..services.llm_client import get_default_client
         client = get_default_client()
-        # Default to e4b for proposals (better reasoning); fall back to e2b if e4b is missing.
-        for model_name in ("gemma4:e4b", "gemma4:e2b"):
+        # Default to e4b for proposals (better reasoning); fall back to
+        # gemma2:2b if e4b returns no parseable JSON. (gemma4:e2b skipped —
+        # its model runner crashes on the demo macmini Ollama.)
+        for model_name in ("gemma4:e4b", "gemma2:2b"):
             try:
                 # `chat_json` returns a 2-tuple: (parsed_dict_or_None, raw_LLMResponse).
                 # An earlier revision treated the return value as the parsed dict
@@ -571,9 +664,14 @@ def propose_interventions(scenario_id: str):
                     )
                 raw_proposals = parsed.get("proposals") or []
                 summary = (parsed.get("summary") or "")[:200]
+                # Restrict to the filtered catalog — Gemma might hallucinate
+                # a cross-city id (e.g. propose an LA intervention for
+                # Valencia). The prompt already shows only filtered ids,
+                # but the validation here is the final gate.
+                allowed_ids = {c["id"] for c in catalog}
                 for p in raw_proposals[:max_n]:
                     iid = p.get("intervention_id") or p.get("id")
-                    if not iid or iid not in PRESET_INTERVENTIONS:
+                    if not iid or iid not in allowed_ids:
                         continue
                     iv = PRESET_INTERVENTIONS[iid]
                     proposals.append({
@@ -695,7 +793,7 @@ def run_mc(scenario_id: str):
     duration_hours = body.get("duration_hours")
     n_population_agents = int(body.get("n_population_agents", 200))
     use_llm = bool(body.get("use_llm", False))
-    fast_model = body.get("fast_model", "gemma4:e2b")
+    fast_model = body.get("fast_model", Config.TRIAGE_MODEL_NAME)
     streaming = bool(body.get("streaming", False))
 
     # Validate interventions
@@ -723,11 +821,37 @@ def run_mc(scenario_id: str):
     cache = get_default_cache()
 
     if streaming:
+        # Per-scenario in-flight cap: if a streaming run is already
+        # active for this scenario_id (no _result, no _error yet),
+        # return its existing run_id with status="already_running".
+        # Prevents Re-run-spam (mashing the button N times) from
+        # spawning N parallel MC workers, which would OOM the macmini
+        # Ollama on use_llm=True runs.
+        with _MC_PROGRESS_LOCK:
+            for existing_run_id, entry in _MC_PROGRESS.items():
+                if (
+                    entry.get("_scenario_id") == scenario_id
+                    and "_result" not in entry
+                    and "_error" not in entry
+                ):
+                    return jsonify({
+                        "success": True,
+                        "data": {
+                            "run_id": existing_run_id,
+                            "status": "already_running",
+                        },
+                    }), 202
+
         run_id = uuid.uuid4().hex[:8]
         # Seed the progress store before starting the thread so polling can
-        # find the run_id immediately after the 202 response.
+        # find the run_id immediately after the 202 response. The
+        # `_scenario_id` field is private (underscore-prefix) and is
+        # filtered out of the public /progress arms snapshot.
         with _MC_PROGRESS_LOCK:
-            _MC_PROGRESS[run_id] = {"recent_decisions": []}
+            _MC_PROGRESS[run_id] = {
+                "recent_decisions": [],
+                "_scenario_id": scenario_id,
+            }
             _MC_PROGRESS.move_to_end(run_id)
             # Evict oldest COMPLETED entries when over cap. In-flight runs
             # (no `_result` / `_error` yet) are NEVER evicted — otherwise a
