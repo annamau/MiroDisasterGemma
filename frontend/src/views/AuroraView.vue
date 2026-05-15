@@ -322,9 +322,12 @@ const selectedInterventionIds = ref([
 const nTrials = ref(8)
 const nPopulation = ref(80)
 const durationHours = ref(24)
-// Gemma 4 is always on. Set during onMounted from `?gemma=off` URL param
-// only as an emergency fallback; the toggle is no longer in the UI.
-const useLLM = ref(true)
+// MC trials default to synth-only for fast, animated demos (deterministic
+// archetype actions + cache-baked decisions). Gemma 4 still drives the
+// post-MC "propose interventions" panel and the named-witness feed —
+// the agent decision feed is templated, not LLM-generated, so it stays
+// snappy. Set `?gemma=full` to re-enable per-cell LLM calls (slow path).
+const useLLM = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 
@@ -846,6 +849,7 @@ watch(currentAct, (n) => {
 }, { immediate: false })
 
 // Apply ?act=N from URL on cold load (precursor to M7' full URL driver).
+// `?gemma=full` opts into per-cell Gemma decisions inside MC trials (slow);
 // `?gemma=off` is the emergency fallback when Ollama is down at demo time.
 function applyActFromUrl() {
   if (typeof window === 'undefined') return
@@ -854,7 +858,9 @@ function applyActFromUrl() {
   if (Number.isFinite(a) && a >= 0 && a <= 5) {
     currentAct.value = a
   }
-  if (params.get('gemma') === 'off') {
+  if (params.get('gemma') === 'full') {
+    useLLM.value = true
+  } else if (params.get('gemma') === 'off') {
     useLLM.value = false
   }
 }

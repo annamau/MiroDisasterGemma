@@ -201,13 +201,23 @@ def _sample_decision_for_cell(
         )
         return synth
 
-    parsed, content, was_cached = cache.get_or_call(
-        llm_call,
-        system=archetype.system, user=user, model=fast_model,
-        max_tokens=200, temperature=0.4,
-    )
-    if isinstance(parsed, dict):
-        return parsed
+    # LLM call with a tight timeout so trials always make progress.
+    # On any failure (timeout, HTTP error, parse fail) fall back to synth
+    # — the simulator stays deterministic-by-archetype rather than stalling
+    # the whole MC on a slow Ollama runtime.  3s is enough for a warm
+    # gemma2:2b call on the macmini; anything slower drops to synth and
+    # the demo keeps animating.
+    try:
+        parsed, content, was_cached = cache.get_or_call(
+            llm_call,
+            system=archetype.system, user=user, model=fast_model,
+            max_tokens=200, temperature=0.4,
+            timeout=3,
+        )
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
     return _synth_decision(cell.archetype)
 
 

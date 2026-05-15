@@ -2,9 +2,20 @@
 <template>
   <div ref="root" class="mc-progress-panel" role="status" aria-live="polite">
     <div class="panel-header">
-      <span class="panel-title">Running Monte Carlo</span>
-      <span class="panel-meta">{{ overallText }}</span>
+      <div class="title-block">
+        <span class="panel-title">Running Monte Carlo</span>
+        <span class="panel-sub">Gemma 4 deciding · {{ arms.length }} arm<span v-if="arms.length !== 1">s</span></span>
+      </div>
+      <div class="overall-block">
+        <span class="overall-count">{{ overallDone }}<span class="of">/{{ overallTotal }}</span></span>
+        <span class="overall-label">trials</span>
+      </div>
     </div>
+
+    <div class="overall-bar" :aria-label="`Overall progress: ${overallPct}%`">
+      <div class="overall-fill" :style="{ width: `${overallPct}%` }"></div>
+    </div>
+
     <div
       v-for="arm in arms"
       :key="arm.intervention_id"
@@ -13,24 +24,30 @@
     >
       <div class="arm-label">
         <ElementBadge :element="arm.element || 'aether'" :icon="arm.icon || 'Siren'" :size="20" />
-        <span class="arm-text">{{ arm.label }}</span>
+        <div class="arm-text-block">
+          <span class="arm-text">{{ arm.label }}</span>
+          <span class="arm-sub" v-if="meanOf(arm.intervention_id) !== null">
+            mean deaths so far: <strong>{{ Math.round(meanOf(arm.intervention_id)).toLocaleString() }}</strong>
+          </span>
+          <span class="arm-sub muted" v-else>waiting for first trial…</span>
+        </div>
       </div>
-      <div class="bar-track">
-        <div
-          class="bar-fill"
-          :ref="(el) => barRefs[arm.intervention_id] = el"
-          :style="{
-            background: `var(--el-${arm.element || 'aether'})`,
-            color: `var(--el-${arm.element || 'aether'})`,
-          }"
-          :aria-label="`${arm.label}: ${pctOf(arm.intervention_id)}% complete`"
-        ></div>
-      </div>
-      <div class="arm-stats">
-        <span class="counter">{{ doneOf(arm.intervention_id) }}/{{ totalOf(arm.intervention_id) }}</span>
-        <span class="mean" v-if="meanOf(arm.intervention_id) !== null">
-          mean deaths: {{ meanOf(arm.intervention_id).toFixed(1) }}
-        </span>
+      <div class="arm-progress">
+        <div class="bar-track">
+          <div
+            class="bar-fill"
+            :ref="(el) => barRefs[arm.intervention_id] = el"
+            :style="{
+              background: `var(--el-${arm.element || 'aether'})`,
+              color: `var(--el-${arm.element || 'aether'})`,
+            }"
+            :aria-label="`${arm.label}: ${pctOf(arm.intervention_id)}% complete`"
+          ></div>
+        </div>
+        <div class="arm-counter">
+          <span class="counter">{{ doneOf(arm.intervention_id) }}/{{ totalOf(arm.intervention_id) }}</span>
+          <span class="pct">{{ pctOf(arm.intervention_id) }}%</span>
+        </div>
       </div>
     </div>
     <div v-if="error" class="panel-error">{{ error }}</div>
@@ -86,17 +103,22 @@ function pctOf(armId) {
   return Math.min(100, Math.round((doneOf(armId) / total) * 100))
 }
 
-const overallText = computed(() => {
-  const totals = props.arms.reduce(
+const overallTotals = computed(() =>
+  props.arms.reduce(
     (acc, a) => {
       acc.done += doneOf(a.intervention_id)
       acc.total += totalOf(a.intervention_id)
       return acc
     },
     { done: 0, total: 0 },
-  )
-  if (!totals.total) return ''
-  return `${totals.done}/${totals.total} trials`
+  ),
+)
+const overallDone = computed(() => overallTotals.value.done)
+const overallTotal = computed(() => overallTotals.value.total)
+const overallPct = computed(() => {
+  const { done, total } = overallTotals.value
+  if (!total) return 0
+  return Math.min(100, Math.round((done / total) * 100))
 })
 
 function applyBarWidth(armId, pct) {
@@ -234,46 +256,115 @@ defineExpose({ recentDecisions })
 .panel-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: var(--sp-2);
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .panel-title {
-  font-size: var(--fz-14);
-  font-weight: 600;
+  font-size: var(--fz-12);
+  font-weight: 700;
   color: var(--ink-0);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
-.panel-meta {
-  font-size: var(--fz-12);
-  color: var(--ink-1);
+.panel-sub {
+  font-size: 11px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.overall-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1;
+}
+.overall-count {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink-0);
   font-variant-numeric: tabular-nums;
 }
+.overall-count .of {
+  color: var(--ink-2);
+  font-weight: 400;
+  font-size: 16px;
+}
+.overall-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 4px;
+}
+
+.overall-bar {
+  position: relative;
+  height: 4px;
+  background: var(--bg-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.overall-fill {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: linear-gradient(90deg, var(--el-aether), var(--el-water));
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
 .arm-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 2fr auto;
-  gap: var(--sp-3);
+  grid-template-columns: minmax(200px, 1.2fr) 2fr;
+  gap: var(--sp-4);
   align-items: center;
+  padding: var(--sp-2) 0;
+  border-top: 1px dashed var(--line);
 }
 .arm-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-2);
+  min-width: 0;
+}
+.arm-text-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 .arm-text {
   font-size: var(--fz-14);
   color: var(--ink-0);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.arm-sub {
+  font-size: 11px;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.arm-sub.muted { color: var(--ink-2); font-style: italic; }
+
+.arm-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
 .bar-track {
   position: relative;
-  height: 6px;
+  height: 8px;
+  flex: 1;
   background: var(--bg-2);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 .bar-fill {
@@ -282,27 +373,27 @@ defineExpose({ recentDecisions })
   left: 0;
   bottom: 0;
   width: 0;
-  border-radius: 3px;
+  border-radius: 4px;
   filter: drop-shadow(0 0 6px currentColor);
   transition: background 0.2s ease;
 }
-.arm-stats {
+.arm-counter {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 2px;
-  font-size: var(--fz-12);
+  gap: 1px;
+  min-width: 64px;
   font-variant-numeric: tabular-nums;
-  color: var(--ink-1);
-  min-width: 110px;
 }
 .counter {
+  font-size: var(--fz-12);
   font-weight: 600;
   color: var(--ink-0);
 }
-.mean {
+.pct {
+  font-size: 10px;
   color: var(--ink-2);
-  font-size: 11px;
+  font-weight: 600;
 }
 .panel-error {
   font-size: var(--fz-12);

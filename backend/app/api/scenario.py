@@ -28,6 +28,7 @@ from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
+from ..config import Config
 from ..aurora.decision_cache import get_default_cache
 from ..aurora.hazus_fragility import (
     estimate_building_loss, shaking_intensity_to_sa,
@@ -130,14 +131,59 @@ _ARCHETYPE_TEMPLATES: dict[str, list[str]] = {
 
 _DISTRICT_IDS = ["LA-D01", "LA-D02", "LA-D03", "LA-D04", "LA-D05", "LA-D06", "LA-D07", "LA-D08"]
 
+# Named "agents" pinned to each archetype so the decision feed reads like a
+# real crowd — a Twitter/Mastodon-style timeline with avatars and handles.
+# Names are intentionally diverse but generic; not real people. Avatar uses
+# the deterministic DiceBear "thumbs" set so initials map stably to a face.
+_ARCHETYPE_PEOPLE: dict[str, list[dict[str, str]]] = {
+    "eyewitness": [
+        {"name": "Maya Rivera",    "handle": "@maya_r",       "role": "Eyewitness"},
+        {"name": "Devon Park",     "handle": "@devpark",      "role": "Eyewitness"},
+        {"name": "Aisha Brooks",   "handle": "@aishab",       "role": "Eyewitness"},
+        {"name": "Theo Nakamura",  "handle": "@theo_nak",     "role": "Eyewitness"},
+    ],
+    "helper": [
+        {"name": "Carlos Mendez",  "handle": "@carlos_m",     "role": "Volunteer"},
+        {"name": "Priya Shah",     "handle": "@priya_s",      "role": "Volunteer"},
+        {"name": "Jordan Wells",   "handle": "@jwells",       "role": "Mutual aid"},
+        {"name": "Sofia Russo",    "handle": "@sofiar",       "role": "Volunteer"},
+    ],
+    "amplifier": [
+        {"name": "LA Pulse",       "handle": "@lapulse_news", "role": "Local news"},
+        {"name": "Kenji Watts",    "handle": "@kenjiw",       "role": "Reporter"},
+        {"name": "Crisis Watch",   "handle": "@crisis_la",    "role": "Aggregator"},
+        {"name": "Nora Singh",     "handle": "@noras",        "role": "Journalist"},
+    ],
+    "authority": [
+        {"name": "Chief R. Alvarez","handle": "@LAFD_ops",    "role": "LAFD Ops"},
+        {"name": "Mayor's Office", "handle": "@LAMayor",      "role": "City"},
+        {"name": "USAR Cmd",       "handle": "@USAR_CA8",     "role": "USAR"},
+        {"name": "Lt. M. Chen",    "handle": "@lapd_chen",    "role": "LAPD"},
+    ],
+    "vulnerable": [
+        {"name": "Eleanor (78)",   "handle": "@elliegram",    "role": "Senior"},
+        {"name": "Marcus T.",      "handle": "@mtee",         "role": "Wheelchair user"},
+        {"name": "Linh Tran",      "handle": "@linhfam",      "role": "Parent of 2"},
+        {"name": "Ramon Diaz",     "handle": "@ramon_d",      "role": "Diabetes / insulin"},
+    ],
+}
+
 
 def _get_synthetic_decision(arm_id: str, trial_idx: int, rng: Any) -> dict[str, Any]:
-    """Generate one plausible-looking agent decision for the log ticker."""
+    """Generate one plausible-looking agent decision for the log ticker.
+
+    Each decision is attributed to a named character so the feed reads like
+    a real social timeline with avatars + handles, not anonymized chips.
+    """
     archetype = rng.choice(list(_ARCHETYPE_TEMPLATES.keys()))
     template = rng.choice(_ARCHETYPE_TEMPLATES[archetype])
+    person = rng.choice(_ARCHETYPE_PEOPLE[archetype])
     district = rng.choice(_DISTRICT_IDS)
     hour = trial_idx % 24
     minute = (trial_idx * 7) % 60
+    # Stable avatar seed from the handle — the frontend renders this via
+    # DiceBear so the same person always gets the same face.
+    avatar_seed = person["handle"].lstrip("@")
     return {
         "archetype": archetype,
         "district_id": district,
@@ -145,6 +191,10 @@ def _get_synthetic_decision(arm_id: str, trial_idx: int, rng: Any) -> dict[str, 
         "minute": minute,
         "post_text": template,
         "timestamp": time.time(),
+        "agent_name": person["name"],
+        "agent_handle": person["handle"],
+        "agent_role": person["role"],
+        "avatar_seed": avatar_seed,
     }
 
 
@@ -548,8 +598,10 @@ def propose_interventions(scenario_id: str):
     try:
         from ..services.llm_client import get_default_client
         client = get_default_client()
-        # Default to e4b for proposals (better reasoning); fall back to e2b if e4b is missing.
-        for model_name in ("gemma4:e4b", "gemma4:e2b"):
+        # Default to e4b for proposals (better reasoning); fall back to
+        # gemma2:2b if e4b returns no parseable JSON. (gemma4:e2b skipped —
+        # its model runner crashes on the demo macmini Ollama.)
+        for model_name in ("gemma4:e4b", "gemma2:2b"):
             try:
                 # `chat_json` returns a 2-tuple: (parsed_dict_or_None, raw_LLMResponse).
                 # An earlier revision treated the return value as the parsed dict
@@ -695,7 +747,7 @@ def run_mc(scenario_id: str):
     duration_hours = body.get("duration_hours")
     n_population_agents = int(body.get("n_population_agents", 200))
     use_llm = bool(body.get("use_llm", False))
-    fast_model = body.get("fast_model", "gemma4:e2b")
+    fast_model = body.get("fast_model", Config.TRIAGE_MODEL_NAME)
     streaming = bool(body.get("streaming", False))
 
     # Validate interventions
