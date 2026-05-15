@@ -67,6 +67,43 @@ REFERENCE_BUILDERS = {
     "atlantis":                 build_atlantis,
 }
 
+
+# Scenario-id → tuple of intervention_id prefixes that apply to that city.
+# Pompeii/Joplin/Turkey/Atlantis have no scenario-specific interventions
+# modelled yet — propose returns an empty list with an honest summary
+# instead of forcing an LA fallback (which would yield deaths_saved=0
+# across the board, the demo-killer flagged in the red-team review).
+_SCENARIO_INTERVENTION_PREFIXES: dict[str, tuple[str, ...]] = {
+    "la-puente-hills-m72-ref": (
+        "preposition_d03_", "evac_d03_", "retrofit_d0",
+        "prebunk_misinfo", "fire_break_",
+    ),
+    "valencia-dana-2024": ("vlc_",),
+}
+
+
+def _filter_catalog_for_scenario(scenario_id: str) -> list[dict[str, Any]]:
+    """Return only the intervention catalog entries that apply to this scenario.
+
+    Empty list = no catalog for this scenario yet (honest empty, NOT a
+    silent LA fallback).
+    """
+    prefixes = _SCENARIO_INTERVENTION_PREFIXES.get(scenario_id, ())
+    out: list[dict[str, Any]] = []
+    if not prefixes:
+        return out
+    for iid, iv in PRESET_INTERVENTIONS.items():
+        if iid == "baseline":
+            continue
+        if iid.startswith(prefixes):
+            out.append({
+                "id": iid,
+                "kind": iv.kind,
+                "label": iv.label,
+                "cost_usd": iv.cost_usd,
+            })
+    return out
+
 # ---------------------------------------------------------------------------
 # Streaming Monte Carlo progress store
 # ---------------------------------------------------------------------------
@@ -548,15 +585,19 @@ def propose_interventions(scenario_id: str):
 
     # Build the prompt context — keep it tight; Gemma 4 e4b at 128K is fine
     # but the response speed matters for the live demo.
-    catalog = []
-    for iid, iv in PRESET_INTERVENTIONS.items():
-        if iid == "baseline":
-            continue
-        catalog.append({
-            "id": iid,
-            "kind": iv.kind,
-            "label": iv.label,
-            "cost_usd": iv.cost_usd,
+    # Filter the catalog to interventions scoped to THIS scenario's city.
+    # Scenarios without a modelled catalog get an honest empty response,
+    # not a silent LA fallback (deaths_saved=0 would be the result).
+    catalog = _filter_catalog_for_scenario(scenario_id)
+    if not catalog:
+        return jsonify({
+            "success": True,
+            "data": {
+                "proposals": [],
+                "summary": "No interventions modelled for this scenario yet.",
+                "model": "none",
+                "generated_at": int(time.time()),
+            },
         })
 
     top_districts = sorted(
@@ -623,9 +664,14 @@ def propose_interventions(scenario_id: str):
                     )
                 raw_proposals = parsed.get("proposals") or []
                 summary = (parsed.get("summary") or "")[:200]
+                # Restrict to the filtered catalog — Gemma might hallucinate
+                # a cross-city id (e.g. propose an LA intervention for
+                # Valencia). The prompt already shows only filtered ids,
+                # but the validation here is the final gate.
+                allowed_ids = {c["id"] for c in catalog}
                 for p in raw_proposals[:max_n]:
                     iid = p.get("intervention_id") or p.get("id")
-                    if not iid or iid not in PRESET_INTERVENTIONS:
+                    if not iid or iid not in allowed_ids:
                         continue
                     iv = PRESET_INTERVENTIONS[iid]
                     proposals.append({
@@ -775,11 +821,37 @@ def run_mc(scenario_id: str):
     cache = get_default_cache()
 
     if streaming:
+        # Per-scenario in-flight cap: if a streaming run is already
+        # active for this scenario_id (no _result, no _error yet),
+        # return its existing run_id with status="already_running".
+        # Prevents Re-run-spam (mashing the button N times) from
+        # spawning N parallel MC workers, which would OOM the macmini
+        # Ollama on use_llm=True runs.
+        with _MC_PROGRESS_LOCK:
+            for existing_run_id, entry in _MC_PROGRESS.items():
+                if (
+                    entry.get("_scenario_id") == scenario_id
+                    and "_result" not in entry
+                    and "_error" not in entry
+                ):
+                    return jsonify({
+                        "success": True,
+                        "data": {
+                            "run_id": existing_run_id,
+                            "status": "already_running",
+                        },
+                    }), 202
+
         run_id = uuid.uuid4().hex[:8]
         # Seed the progress store before starting the thread so polling can
-        # find the run_id immediately after the 202 response.
+        # find the run_id immediately after the 202 response. The
+        # `_scenario_id` field is private (underscore-prefix) and is
+        # filtered out of the public /progress arms snapshot.
         with _MC_PROGRESS_LOCK:
-            _MC_PROGRESS[run_id] = {"recent_decisions": []}
+            _MC_PROGRESS[run_id] = {
+                "recent_decisions": [],
+                "_scenario_id": scenario_id,
+            }
             _MC_PROGRESS.move_to_end(run_id)
             # Evict oldest COMPLETED entries when over cap. In-flight runs
             # (no `_result` / `_error` yet) are NEVER evicted — otherwise a

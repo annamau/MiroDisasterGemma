@@ -335,10 +335,14 @@ def _delta_for_intervention(
 
     # Compute cost_per_life_saved_usd when the intervention carries cost data
     # and the mean lives-saved estimate is positive (avoid division-by-zero /
-    # nonsensical negative CPL).
+    # nonsensical negative CPL). math.isfinite() is a defence-in-depth net
+    # so we never emit a literal Infinity to JSON (DeltaCard treats None
+    # gracefully).
     cost_per_life: float | None = None
     if lives.point > 0:
         cost_per_life = round(intervention.cost_usd / lives.point, 2)
+    if cost_per_life is not None and not math.isfinite(cost_per_life):
+        cost_per_life = None
 
     return InterventionDelta(
         intervention_id=treated.intervention_id,
